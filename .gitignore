@@ -1,0 +1,37 @@
+# ── Whitelist: na git jen vybrané složky a soubory ──
+/*
+!/backtest/
+!/config/
+!/core/
+!/infra/
+!/runtime/
+!/scripts/
+!/strategy/
+!/tests/
+!/.gitignore
+!/main.py
+!/_debug_out.py
+!/check_waves.py
+!/check_waves2.py
+!/download_data.py
+
+# ── Výjimky uvnitř povolených cest ──
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.idea/
+
+# Secrets / local env
+mt5_credentials.py
+.env.sync
+
+# Runtime logs
+*.log
+*.jsonl
+
+# Live bot process locks (runtime/instance_lock.py)
+locks/
+
+# Generated reports/artifacts
+results/

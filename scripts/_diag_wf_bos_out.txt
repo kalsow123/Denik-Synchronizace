@@ -1,0 +1,385 @@
+﻿
+=== HTML WF markers + nearby index labels ===
+WF at 2026-03-04T08:00:00
+  label 1 at 2026-03-10T22:30:00
+  label 4 at 2026-03-10T16:30:00
+  label 3 at 2026-03-10T08:30:00
+  label 2 at 2026-03-09T23:30:00
+  label 1 at 2026-03-09T15:30:00
+  label 2 at 2026-03-06T11:00:00
+  label 1 at 2026-03-05T16:00:00
+  label 1 at 2026-03-05T12:30:00
+  label 1 at 2026-03-05T10:00:00
+  label 2 at 2026-03-04T12:00:00
+  label 1 at 2026-03-03T19:00:00
+  label 2 at 2026-03-03T15:30:00
+  label 1 at 2026-03-03T08:00:00
+WF at 2026-03-11T17:30:00
+  label 1 at 2026-03-18T10:00:00
+  label 4 at 2026-03-18T06:00:00
+  label 3 at 2026-03-17T20:00:00
+  label 2 at 2026-03-17T15:30:00
+  label 1 at 2026-03-17T10:30:00
+  label 1 at 2026-03-17T07:30:00
+  label 3 at 2026-03-16T20:30:00
+  label 2 at 2026-03-16T13:30:00
+  label 1 at 2026-03-16T01:30:00
+  label 6 at 2026-03-13T03:30:00
+  label 5 at 2026-03-12T17:00:00
+  label 4 at 2026-03-12T00:30:00
+  label 3 at 2026-03-11T15:30:00
+  label 2 at 2026-03-11T12:00:00
+  label 1 at 2026-03-10T22:30:00
+  label 4 at 2026-03-10T16:30:00
+  label 3 at 2026-03-10T08:30:00
+  label 2 at 2026-03-09T23:30:00
+  label 1 at 2026-03-09T15:30:00
+  label 2 at 2026-03-06T11:00:00
+  label 1 at 2026-03-05T16:00:00
+  label 1 at 2026-03-05T12:30:00
+  label 1 at 2026-03-05T10:00:00
+WF at 2026-03-30T00:30:00
+  label 1 at 2026-04-03T19:00:00
+  label 1 at 2026-04-02T15:30:00
+  label 3 at 2026-04-02T13:00:00
+  label 2 at 2026-04-02T06:30:00
+  label 1 at 2026-04-01T20:00:00
+  label 4 at 2026-04-01T16:30:00
+  label 3 at 2026-04-01T08:00:00
+  label 2 at 2026-04-01T00:30:00
+  label 1 at 2026-03-31T17:30:00
+  label 7 at 2026-03-30T12:30:00
+  label 5 at 2026-03-27T11:30:00
+  label 4 at 2026-03-26T18:00:00
+  label 3 at 2026-03-26T09:00:00
+  label 2 at 2026-03-25T15:00:00
+  label 1 at 2026-03-25T06:00:00
+  label 2 at 2026-03-25T02:00:00
+  label 1 at 2026-03-24T21:30:00
+  label 3 at 2026-03-24T18:30:00
+  label 2 at 2026-03-24T02:00:00
+  label 1 at 2026-03-23T15:30:00
+  label 5 at 2026-03-23T12:30:00
+  label 4 at 2026-03-23T03:00:00
+WF at 2026-04-28T03:30:00
+  label 3 at 2026-05-05T00:00:00
+  label 2 at 2026-05-04T11:00:00
+  label 1 at 2026-05-01T23:30:00
+  label 4 at 2026-05-01T13:00:00
+  label 3 at 2026-05-01T01:00:00
+  label 1 at 2026-04-30T11:30:00
+  label 2 at 2026-04-30T05:00:00
+  label 1 at 2026-04-29T22:30:00
+  label 1 at 2026-04-28T20:30:00
+  label 4 at 2026-04-28T13:00:00
+  label 3 at 2026-04-28T07:00:00
+  label 1 at 2026-04-27T20:30:00
+  label 4 at 2026-04-27T14:30:00
+  label 3 at 2026-04-27T11:30:00
+  label 2 at 2026-04-27T04:30:00
+  label 1 at 2026-04-24T10:30:00
+  label 4 at 2026-04-24T05:30:00
+  label 3 at 2026-04-23T12:00:00
+  label 2 at 2026-04-23T05:00:00
+  label 1 at 2026-04-22T17:00:00
+  label 1 at 2026-04-22T07:00:00
+  label 2 at 2026-04-21T22:00:00
+  label 1 at 2026-04-21T11:30:00
+WF at 2026-04-30T16:30:00
+  label 2 at 2026-05-06T09:30:00
+  label 1 at 2026-05-06T03:00:00
+  label 3 at 2026-05-05T00:00:00
+  label 2 at 2026-05-04T11:00:00
+  label 1 at 2026-05-01T23:30:00
+  label 4 at 2026-05-01T13:00:00
+  label 3 at 2026-05-01T01:00:00
+  label 1 at 2026-04-30T11:30:00
+  label 2 at 2026-04-30T05:00:00
+  label 1 at 2026-04-29T22:30:00
+  label 1 at 2026-04-28T20:30:00
+  label 4 at 2026-04-28T13:00:00
+  label 3 at 2026-04-28T07:00:00
+  label 1 at 2026-04-27T20:30:00
+  label 4 at 2026-04-27T14:30:00
+  label 3 at 2026-04-27T11:30:00
+  label 2 at 2026-04-27T04:30:00
+  label 1 at 2026-04-24T10:30:00
+  label 4 at 2026-04-24T05:30:00
+WF at 2026-05-08T16:00:00
+  label 2 at 2026-05-06T09:30:00
+  label 1 at 2026-05-06T03:00:00
+  label 3 at 2026-05-05T00:00:00
+  label 2 at 2026-05-04T11:00:00
+  label 1 at 2026-05-01T23:30:00
+
+Engine wf_activations=6
+BOS flip map (35 flips):
+  bar 47 2026-03-03 23:30:00 -> bos_wave 202603032130
+  bar 123 2026-03-05 13:30:00 -> bos_wave 202603051030
+  bar 130 2026-03-05 17:00:00 -> bos_wave 202603051430
+  bar 137 2026-03-05 20:30:00 -> bos_wave 202603051800
+  bar 224 2026-03-09 16:00:00 -> bos_wave 202603090830
+  bar 289 2026-03-11 00:30:00 -> bos_wave 202603102230
+  bar 507 2026-03-17 13:30:00 -> bos_wave 202603171200
+  bar 553 2026-03-18 12:30:00 -> bos_wave 202603181100
+  bar 609 2026-03-19 16:30:00 -> bos_wave 202603190500
+  bar 709 2026-03-23 18:30:00 -> bos_wave 202603231730
+  bar 770 2026-03-25 01:00:00 -> bos_wave 202603242300
+  bar 780 2026-03-25 06:00:00 -> bos_wave 202603250100
+  bar 993 2026-03-31 16:30:00 -> bos_wave 202603310430
+  bar 1054 2026-04-01 23:00:00 -> bos_wave 202604012200
+  bar 1094 2026-04-02 19:00:00 -> bos_wave 202604021730
+  bar 1161 2026-04-06 04:30:00 -> bos_wave 202604060100
+  bar 1226 2026-04-07 13:00:00 -> bos_wave 202604071130
+  bar 1283 2026-04-08 17:30:00 -> bos_wave 202604081600
+  bar 1295 2026-04-08 23:30:00 -> bos_wave 202604082200
+  bar 1383 2026-04-10 19:30:00 -> bos_wave 202604101800
+  bar 1399 2026-04-13 03:30:00 -> bos_wave 202604130200
+  bar 1432 2026-04-13 20:00:00 -> bos_wave 202604131030
+  bar 1557 2026-04-16 10:30:00 -> bos_wave 202604151330
+  bar 1586 2026-04-17 01:00:00 -> bos_wave 202604161900
+  bar 1636 2026-04-20 02:00:00 -> bos_wave 202604200100
+  bar 1724 2026-04-21 22:00:00 -> bos_wave 202604212000
+  bar 1748 2026-04-22 10:00:00 -> bos_wave 202604220800
+  bar 1757 2026-04-22 14:30:00 -> bos_wave 202604212230
+  bar 1845 2026-04-24 10:30:00 -> bos_wave 202604232230
+  bar 1907 2026-04-27 17:30:00 -> bos_wave 202604270900
+  bar 1956 2026-04-28 18:00:00 -> bos_wave 202604271500
+  bar 2010 2026-04-29 21:00:00 -> bos_wave 202604291630
+  bar 2047 2026-04-30 15:30:00 -> bos_wave 202604301400
+  bar 2110 2026-05-01 23:00:00 -> bos_wave 202604300730
+  bar 2219 2026-05-06 05:30:00 -> bos_wave 202605060430
+
+=== WF window 2026-02-27 08:30:00 .. 2026-03-14 08:30:00 ===
+  202603031300 dir=-1 birth=29 dr=26 dl=6 idx=1 origin=normal flags=-
+  202603031430 dir=1 birth=33 dr=29 dl=26 idx=None origin=normal flags=hh_hl_fail
+  202603031700 dir=-1 birth=37 dr=34 dl=29 idx=2 origin=normal flags=-
+  202603032130 dir=1 birth=47 dr=43 dl=34 idx=1 origin=normal flags=BOS_WAVE
+  202603040300 dir=-1 birth=57 dr=54 dl=43 idx=1 origin=normal flags=BOS_WAVE,hh_hl_fail
+  202603040600 dir=1 birth=62 dr=62 dl=54 idx=None origin=normal flags=hh_hl_fail
+  202603040830 dir=1 birth=66 dr=66 dl=63 idx=1 origin=wf_continuation flags=WF
+  202603041100 dir=-1 birth=74 dr=70 dl=67 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603041300 dir=1 birth=79 dr=74 dl=70 idx=2 origin=normal flags=wf_classic
+  202603041700 dir=-1 birth=85 dr=82 dl=74 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603050330 dir=1 birth=105 dr=103 dl=82 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603050800 dir=-1 birth=114 dr=114 dl=103 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603051030 dir=-1 birth=123 dr=117 dl=115 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202603051430 dir=1 birth=130 dr=125 dl=117 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202603051800 dir=-1 birth=137 dr=132 dl=125 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202603060630 dir=1 birth=159 dr=157 dl=132 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603061600 dir=-1 birth=178 dr=176 dl=157 idx=2 origin=normal flags=wf_classic
+  202603062000 dir=1 birth=188 dr=184 dl=176 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603090430 dir=-1 birth=206 dr=201 dl=184 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603090830 dir=1 birth=214 dr=209 dl=201 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202603091130 dir=-1 birth=218 dr=215 dl=209 idx=None origin=normal flags=wf_classic
+  202603091930 dir=1 birth=233 dr=231 dl=215 idx=1 origin=normal flags=wf_classic
+  202603092200 dir=-1 birth=239 dr=236 dl=231 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603100100 dir=1 birth=245 dr=242 dl=236 idx=2 origin=normal flags=wf_classic
+  202603100700 dir=-1 birth=256 dr=254 dl=242 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603101030 dir=1 birth=265 dr=261 dl=254 idx=3 origin=normal flags=wf_classic
+  202603101330 dir=-1 birth=272 dr=267 dl=261 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603102000 dir=1 birth=283 dr=280 dl=267 idx=4 origin=normal flags=wf_classic
+  202603102230 dir=-1 birth=289 dr=290 dl=280 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202603111000 dir=1 birth=310 dr=308 dl=291 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603111230 dir=-1 birth=318 dr=317 dl=308 idx=2 origin=normal flags=wf_classic
+  202603111530 dir=-1 birth=322 dr=321 dl=318 idx=3 origin=normal flags=wf_classic
+  202603111800 dir=-1 birth=324 dr=324 dl=322 idx=None origin=wf_continuation flags=WF,hh_hl_fail
+  202603120730 dir=-1 birth=355 dr=351 dl=324 idx=4 origin=normal flags=wf_classic
+  202603121430 dir=1 birth=367 dr=365 dl=351 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603121800 dir=-1 birth=376 dr=375 dl=365 idx=5 origin=normal flags=wf_classic
+  202603131100 dir=-1 birth=410 dr=406 dl=376 idx=6 origin=normal flags=wf_classic
+  202603131630 dir=1 birth=420 dr=417 dl=406 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603132330 dir=-1 birth=435 dr=431 dl=417 idx=None origin=normal flags=wf_classic
+  >> WF wave 202603040830 idx=1 is_bos=None in_bos_map=False
+
+=== WF window 2026-03-06 18:00:00 .. 2026-03-21 18:00:00 ===
+  202603062000 dir=1 birth=188 dr=184 dl=176 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603090430 dir=-1 birth=206 dr=201 dl=184 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603090830 dir=1 birth=214 dr=209 dl=201 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202603091130 dir=-1 birth=218 dr=215 dl=209 idx=None origin=normal flags=wf_classic
+  202603091930 dir=1 birth=233 dr=231 dl=215 idx=1 origin=normal flags=wf_classic
+  202603092200 dir=-1 birth=239 dr=236 dl=231 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603100100 dir=1 birth=245 dr=242 dl=236 idx=2 origin=normal flags=wf_classic
+  202603100700 dir=-1 birth=256 dr=254 dl=242 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603101030 dir=1 birth=265 dr=261 dl=254 idx=3 origin=normal flags=wf_classic
+  202603101330 dir=-1 birth=272 dr=267 dl=261 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603102000 dir=1 birth=283 dr=280 dl=267 idx=4 origin=normal flags=wf_classic
+  202603102230 dir=-1 birth=289 dr=290 dl=280 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202603111000 dir=1 birth=310 dr=308 dl=291 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603111230 dir=-1 birth=318 dr=317 dl=308 idx=2 origin=normal flags=wf_classic
+  202603111530 dir=-1 birth=322 dr=321 dl=318 idx=3 origin=normal flags=wf_classic
+  202603111800 dir=-1 birth=324 dr=324 dl=322 idx=None origin=wf_continuation flags=WF,hh_hl_fail
+  202603120730 dir=-1 birth=355 dr=351 dl=324 idx=4 origin=normal flags=wf_classic
+  202603121430 dir=1 birth=367 dr=365 dl=351 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603121800 dir=-1 birth=376 dr=375 dl=365 idx=5 origin=normal flags=wf_classic
+  202603131100 dir=-1 birth=410 dr=406 dl=376 idx=6 origin=normal flags=wf_classic
+  202603131630 dir=1 birth=420 dr=417 dl=406 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603132330 dir=-1 birth=435 dr=431 dl=417 idx=None origin=normal flags=wf_classic
+  202603160400 dir=1 birth=443 dr=440 dl=431 idx=1 origin=normal flags=wf_classic
+  202603161030 dir=-1 birth=456 dr=453 dl=440 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603161700 dir=1 birth=469 dr=466 dl=453 idx=2 origin=normal flags=wf_classic
+  202603161930 dir=-1 birth=474 dr=471 dl=466 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603162200 dir=1 birth=478 dr=476 dl=471 idx=3 origin=normal flags=wf_classic
+  202603170430 dir=-1 birth=492 dr=489 dl=476 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603170630 dir=1 birth=497 dr=493 dl=489 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603170900 dir=-1 birth=501 dr=498 dl=493 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202603171200 dir=1 birth=507 dr=504 dl=498 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202603171500 dir=-1 birth=512 dr=510 dl=504 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603171600 dir=1 birth=517 dr=512 dl=510 idx=2 origin=normal flags=wf_classic
+  202603171900 dir=-1 birth=522 dr=518 dl=512 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603172100 dir=1 birth=529 dr=522 dl=518 idx=3 origin=normal flags=wf_classic
+  202603180330 dir=-1 birth=540 dr=535 dl=522 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603180900 dir=1 birth=549 dr=546 dl=535 idx=4 origin=normal flags=wf_classic
+  202603181100 dir=-1 birth=553 dr=550 dl=546 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202603181400 dir=1 birth=559 dr=556 dl=550 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603181600 dir=-1 birth=564 dr=560 dl=556 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603181800 dir=1 birth=570 dr=564 dl=560 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603182330 dir=-1 birth=579 dr=575 dl=564 idx=2 origin=normal flags=wf_classic
+  202603190500 dir=1 birth=589 dr=586 dl=575 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202603191130 dir=-1 birth=603 dr=599 dl=586 idx=3 origin=normal flags=wf_classic
+  202603192200 dir=1 birth=625 dr=620 dl=599 idx=1 origin=normal flags=wf_classic
+  202603200830 dir=-1 birth=645 dr=641 dl=620 idx=1 origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202603201100 dir=1 birth=649 dr=646 dl=641 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603201300 dir=-1 birth=653 dr=650 dl=646 idx=2 origin=normal flags=wf_classic
+  202603201430 dir=1 birth=657 dr=653 dl=650 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603201700 dir=-1 birth=662 dr=658 dl=653 idx=3 origin=normal flags=wf_classic
+  202603202100 dir=1 birth=677 dr=666 dl=658 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  >> WF wave 202603111800 idx=None is_bos=None in_bos_map=False
+
+=== WF window 2026-03-25 00:00:00 .. 2026-04-09 00:00:00 ===
+  202603250100 dir=-1 birth=775 dr=770 dl=766 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202603250330 dir=1 birth=779 dr=775 dl=770 idx=2 origin=normal flags=wf_classic
+  202603250900 dir=-1 birth=790 dr=786 dl=775 idx=1 origin=normal flags=wf_classic
+  202603251130 dir=1 birth=798 dr=791 dl=786 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603251900 dir=-1 birth=809 dr=806 dl=791 idx=2 origin=normal flags=wf_classic
+  202603252030 dir=1 birth=813 dr=809 dl=806 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603252330 dir=-1 birth=819 dr=822 dl=809 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603260730 dir=1 birth=833 dr=831 dl=823 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603261100 dir=-1 birth=842 dr=838 dl=831 idx=3 origin=normal flags=wf_classic
+  202603261300 dir=1 birth=849 dr=842 dl=838 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603262300 dir=-1 birth=865 dr=862 dl=842 idx=4 origin=normal flags=wf_classic
+  202603270100 dir=1 birth=870 dr=866 dl=862 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603270330 dir=-1 birth=877 dr=871 dl=866 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603270830 dir=1 birth=884 dr=881 dl=871 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603271500 dir=-1 birth=896 dr=894 dl=881 idx=5 origin=normal flags=wf_classic
+  202603271830 dir=1 birth=904 dr=901 dl=894 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603272030 dir=-1 birth=909 dr=909 dl=901 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603300000 dir=-1 birth=916 dr=916 dl=910 idx=6 origin=wf_continuation flags=WF
+  202603300700 dir=1 birth=930 dr=926 dl=917 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603301800 dir=-1 birth=952 dr=948 dl=926 idx=7 origin=normal flags=wf_classic
+  202603310430 dir=1 birth=972 dr=969 dl=948 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202603310900 dir=-1 birth=984 dr=986 dl=969 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202603311930 dir=1 birth=1004 dr=1003 dl=987 idx=1 origin=normal flags=wf_classic
+  202604010300 dir=1 birth=1017 dr=1014 dl=1004 idx=2 origin=normal flags=wf_classic
+  202604010430 dir=-1 birth=1023 dr=1017 dl=1014 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604011130 dir=1 birth=1036 dr=1031 dl=1017 idx=3 origin=normal flags=wf_classic
+  202604011530 dir=-1 birth=1041 dr=1039 dl=1031 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604011800 dir=1 birth=1048 dr=1044 dl=1039 idx=4 origin=normal flags=wf_classic
+  202604012200 dir=-1 birth=1054 dr=1052 dl=1044 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202604020400 dir=1 birth=1066 dr=1064 dl=1052 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604020900 dir=-1 birth=1080 dr=1074 dl=1064 idx=2 origin=normal flags=wf_classic
+  202604021230 dir=1 birth=1084 dr=1081 dl=1074 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604021400 dir=-1 birth=1089 dr=1084 dl=1081 idx=3 origin=normal flags=wf_classic
+  202604021730 dir=1 birth=1094 dr=1091 dl=1084 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202604022300 dir=-1 birth=1104 dr=1109 dl=1091 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604030800 dir=-1 birth=1124 dr=1120 dl=1110 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604031330 dir=1 birth=1138 dr=1131 dl=1120 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604060100 dir=-1 birth=1158 dr=1154 dl=1131 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202604061030 dir=1 birth=1177 dr=1173 dl=1154 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604061330 dir=-1 birth=1182 dr=1179 dl=1173 idx=1 origin=normal flags=wf_classic
+  202604061730 dir=1 birth=1191 dr=1187 dl=1179 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604062000 dir=-1 birth=1198 dr=1201 dl=1187 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604070500 dir=-1 birth=1213 dr=1210 dl=1202 idx=2 origin=normal flags=wf_classic
+  202604071130 dir=1 birth=1226 dr=1223 dl=1210 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202604071300 dir=-1 birth=1233 dr=1226 dl=1223 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604071730 dir=1 birth=1239 dr=1235 dl=1226 idx=2 origin=normal flags=wf_classic
+  202604072000 dir=-1 birth=1244 dr=1240 dl=1235 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604080300 dir=1 birth=1257 dr=1254 dl=1240 idx=3 origin=normal flags=wf_classic
+  202604080630 dir=-1 birth=1264 dr=1261 dl=1254 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604080830 dir=1 birth=1269 dr=1265 dl=1261 idx=4 origin=normal flags=wf_classic
+  202604081130 dir=-1 birth=1275 dr=1271 dl=1265 idx=1 origin=normal flags=wf_classic
+  202604081600 dir=1 birth=1283 dr=1280 dl=1271 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202604082200 dir=-1 birth=1295 dr=1292 dl=1280 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  >> WF wave 202603300000 idx=6 is_bos=None in_bos_map=False
+
+=== WF window 2026-04-23 04:00:00 .. 2026-05-08 04:00:00 ===
+  202604230630 dir=-1 birth=1792 dr=1789 dl=1783 idx=2 origin=normal flags=wf_classic
+  202604231000 dir=1 birth=1801 dr=1796 dl=1789 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604231430 dir=-1 birth=1809 dr=1805 dl=1796 idx=3 origin=normal flags=wf_classic
+  202604231730 dir=1 birth=1814 dr=1811 dl=1805 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604232030 dir=-1 birth=1821 dr=1817 dl=1811 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604232230 dir=1 birth=1829 dr=1832 dl=1817 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202604240630 dir=-1 birth=1841 dr=1837 dl=1833 idx=4 origin=normal flags=wf_classic
+  202604241430 dir=1 birth=1855 dr=1853 dl=1837 idx=1 origin=normal flags=wf_classic
+  202604241630 dir=-1 birth=1860 dr=1870 dl=1853 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604270230 dir=-1 birth=1881 dr=1877 dl=1871 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604270630 dir=1 birth=1889 dr=1885 dl=1877 idx=2 origin=normal flags=wf_classic
+  202604270900 dir=-1 birth=1893 dr=1890 dl=1885 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202604271130 dir=1 birth=1900 dr=1900 dl=1890 idx=3 origin=normal flags=wf_classic
+  202604271500 dir=1 birth=1906 dr=1902 dl=1901 idx=4 origin=normal flags=wf_classic,BOS_WAVE
+  202604272130 dir=-1 birth=1921 dr=1925 dl=1902 idx=1 origin=normal flags=wf_classic
+  202604280400 dir=-1 birth=1928 dr=1928 dl=1926 idx=2 origin=wf_continuation flags=WF
+  202604281000 dir=-1 birth=1942 dr=1941 dl=1928 idx=3 origin=normal flags=wf_classic
+  202604281500 dir=-1 birth=1954 dr=1950 dl=1942 idx=4 origin=normal flags=wf_classic
+  202604282030 dir=1 birth=1969 dr=1973 dl=1950 idx=1 origin=normal flags=wf_classic
+  202604291630 dir=-1 birth=2005 dr=2004 dl=1974 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202604292130 dir=-1 birth=2015 dr=2021 dl=2005 idx=1 origin=normal flags=wf_classic
+  202604300730 dir=-1 birth=2034 dr=2031 dl=2022 idx=2 origin=normal flags=wf_classic,BOS_WAVE
+  202604301400 dir=1 birth=2047 dr=2047 dl=2031 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202604301730 dir=1 birth=2051 dr=2051 dl=2048 idx=2 origin=wf_continuation flags=WF
+  202604301800 dir=1 birth=2057 dr=2081 dl=2051 idx=3 origin=normal flags=wf_classic
+  202605011700 dir=1 birth=2101 dr=2098 dl=2082 idx=4 origin=normal flags=wf_classic
+  202605012330 dir=-1 birth=2119 dr=2124 dl=2098 idx=1 origin=normal flags=wf_classic
+  202605041300 dir=-1 birth=2143 dr=2144 dl=2125 idx=2 origin=normal flags=wf_classic
+  202605041930 dir=-1 birth=2156 dr=2175 dl=2145 idx=3 origin=normal flags=wf_classic
+  202605051830 dir=1 birth=2201 dr=2209 dl=2176 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605060430 dir=1 birth=2219 dr=2218 dl=2210 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202605061330 dir=1 birth=2238 dr=2235 dl=2219 idx=2 origin=normal flags=wf_classic
+  202605061930 dir=-1 birth=2252 dr=2247 dl=2235 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605071230 dir=1 birth=2289 dr=2281 dl=2247 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605072330 dir=-1 birth=2309 dr=2303 dl=2281 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  >> WF wave 202604280400 idx=2 is_bos=None in_bos_map=False
+
+=== WF window 2026-04-25 17:30:00 .. 2026-05-10 17:30:00 ===
+  202604270230 dir=-1 birth=1881 dr=1877 dl=1871 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202604270630 dir=1 birth=1889 dr=1885 dl=1877 idx=2 origin=normal flags=wf_classic
+  202604270900 dir=-1 birth=1893 dr=1890 dl=1885 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202604271130 dir=1 birth=1900 dr=1900 dl=1890 idx=3 origin=normal flags=wf_classic
+  202604271500 dir=1 birth=1906 dr=1902 dl=1901 idx=4 origin=normal flags=wf_classic,BOS_WAVE
+  202604272130 dir=-1 birth=1921 dr=1925 dl=1902 idx=1 origin=normal flags=wf_classic
+  202604280400 dir=-1 birth=1928 dr=1928 dl=1926 idx=2 origin=wf_continuation flags=WF
+  202604281000 dir=-1 birth=1942 dr=1941 dl=1928 idx=3 origin=normal flags=wf_classic
+  202604281500 dir=-1 birth=1954 dr=1950 dl=1942 idx=4 origin=normal flags=wf_classic
+  202604282030 dir=1 birth=1969 dr=1973 dl=1950 idx=1 origin=normal flags=wf_classic
+  202604291630 dir=-1 birth=2005 dr=2004 dl=1974 idx=None origin=normal flags=wf_classic,BOS_WAVE,hh_hl_fail
+  202604292130 dir=-1 birth=2015 dr=2021 dl=2005 idx=1 origin=normal flags=wf_classic
+  202604300730 dir=-1 birth=2034 dr=2031 dl=2022 idx=2 origin=normal flags=wf_classic,BOS_WAVE
+  202604301400 dir=1 birth=2047 dr=2047 dl=2031 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202604301730 dir=1 birth=2051 dr=2051 dl=2048 idx=2 origin=wf_continuation flags=WF
+  202604301800 dir=1 birth=2057 dr=2081 dl=2051 idx=3 origin=normal flags=wf_classic
+  202605011700 dir=1 birth=2101 dr=2098 dl=2082 idx=4 origin=normal flags=wf_classic
+  202605012330 dir=-1 birth=2119 dr=2124 dl=2098 idx=1 origin=normal flags=wf_classic
+  202605041300 dir=-1 birth=2143 dr=2144 dl=2125 idx=2 origin=normal flags=wf_classic
+  202605041930 dir=-1 birth=2156 dr=2175 dl=2145 idx=3 origin=normal flags=wf_classic
+  202605051830 dir=1 birth=2201 dr=2209 dl=2176 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605060430 dir=1 birth=2219 dr=2218 dl=2210 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202605061330 dir=1 birth=2238 dr=2235 dl=2219 idx=2 origin=normal flags=wf_classic
+  202605061930 dir=-1 birth=2252 dr=2247 dl=2235 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605071230 dir=1 birth=2289 dr=2281 dl=2247 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605072330 dir=-1 birth=2309 dr=2303 dl=2281 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605081200 dir=1 birth=2334 dr=2351 dl=2303 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605081630 dir=1 birth=2337 dr=2337 dl=2335 idx=None origin=wf_continuation flags=WF,hh_hl_fail
+  >> WF wave 202604301730 idx=2 is_bos=None in_bos_map=False
+
+=== WF window 2026-05-03 16:30:00 .. 2026-05-18 16:30:00 ===
+  202605041300 dir=-1 birth=2143 dr=2144 dl=2125 idx=2 origin=normal flags=wf_classic
+  202605041930 dir=-1 birth=2156 dr=2175 dl=2145 idx=3 origin=normal flags=wf_classic
+  202605051830 dir=1 birth=2201 dr=2209 dl=2176 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605060430 dir=1 birth=2219 dr=2218 dl=2210 idx=1 origin=normal flags=wf_classic,BOS_WAVE
+  202605061330 dir=1 birth=2238 dr=2235 dl=2219 idx=2 origin=normal flags=wf_classic
+  202605061930 dir=-1 birth=2252 dr=2247 dl=2235 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605071230 dir=1 birth=2289 dr=2281 dl=2247 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605072330 dir=-1 birth=2309 dr=2303 dl=2281 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605081200 dir=1 birth=2334 dr=2351 dl=2303 idx=None origin=normal flags=wf_classic,hh_hl_fail
+  202605081630 dir=1 birth=2337 dr=2337 dl=2335 idx=None origin=wf_continuation flags=WF,hh_hl_fail
+  >> WF wave 202605081630 idx=None is_bos=None in_bos_map=False

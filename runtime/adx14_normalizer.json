@@ -1,0 +1,5 @@
+{
+  "change_median": 0.2572795,
+  "change_iqr": 62.892599,
+  "source": "fit_from_backtest_history"
+}

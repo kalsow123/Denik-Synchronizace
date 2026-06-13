@@ -1,0 +1,18 @@
+﻿=== BOS flipy (close-based) 3.-7.6. ===
+  2025-06-03T13:00:00.000000 | BOS: close pod UP low ? bear | swing=1.14038
+  2025-06-04T11:30:00.000000 | BOS: close nad DOWN high ? bull | swing=1.13929
+  2025-06-06T05:30:00.000000 | BOS: close pod UP low ? bear | swing=1.14396
+
+=== Vlny s index_in_trend 3.-7.6. ===
+
+=== Trend direction po BOS bull flipu (prvni Jun4+) ===
+Prvni bear->bull flip: 2025-05-19 09:30:00 bar 259
+  2025-05-19 09:30:00 bear->bull FLIP=True last_up=None last_down=None
+  2025-05-20 05:00:00 bull->bear FLIP=False last_up=None last_down=202505200330
+  2025-05-20 08:00:00 bear->bull FLIP=True last_up=None last_down=None
+
+=== Bear 202506050830 ===
+birth 2025-06-05 08:30:00 dr 2025-06-05 08:30:00
+bos_wave_at_1600=202506051600
+in_visual= True
+in_bos_map= True
