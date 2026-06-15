@@ -1,0 +1,404 @@
+================================================================================
+NÁVRH OPRAVY: POST-EXT POKRAČOVÁNÍ, ČÍSLOVÁNÍ, WAVE_BOS
+================================================================================
+Datum: 2025-06-13 (revize: konec EXT = HH/HL NEBO 2 vlny ve směru/proti směru)
+Status: PŘIPRAVENO K IMPLEMENTACI — scope §12; Q4 zámek odložen
+Profil: testing (bos_entry, two_sided, wave_counter)
+
+================================================================================
+0. TŘI VRSTVY — NESMÍ SE SPLÉST (zdroj pravdy)
+================================================================================
+
+  ┌────────────────────┬─────────────────────────────────────────────────────┐
+  │ Vrstva             │ Co dělá                                              │
+  ├────────────────────┼─────────────────────────────────────────────────────┤
+  │ A) EXT both-sides  │ Obchodní režim PO EXT vlně (in_ext_range)             │
+  │    režim           │ KDY končí → §1.2 (NE EXT_BOS)                         │
+  ├────────────────────┼─────────────────────────────────────────────────────┤
+  │ B) Počítání vln    │ index_in_trend v hlavní / paralelní větvi             │
+  │    (wave_sequence) │ WAVE_BOS = flip až PO ukončení EXT (§1.4)             │
+  ├────────────────────┼─────────────────────────────────────────────────────┤
+  │ C) EXT_BOS         │ POUZE obchodní: TP pozic ve směru parent EXT trendu   │
+  │    (fib 0.35)      │ (+ volitelně short entry)                             │
+  │                    │ NEUKONČUJE EXT režim. NEMĚNÍ číslování.               │
+  └────────────────────┴─────────────────────────────────────────────────────┘
+
+  POZOR — rozdíl oproti současnému kódu:
+    • Mech B (~768): fib 0.35 dnes nastavuje ext_active_wave = None — CHYBA.
+    • ext_climax_reversal (~1217): 1. opačná = flip + is_bos — CHYBA (May 21).
+    • KROK 3.2 bez HH testu u scenario A (EXT1) — CHYBA (CESTA D, §1.11).
+    • ext_range: konec jen po 2× stejnosměrné, ne po §1.2(a) HH — CHYBA (§6.7).
+    • Klasický BOS / WAVE_BOS uvnitř EXT na mezivlnách — nesmí běžet (§1.4).
+
+================================================================================
+1. UŽIVATELSKÁ PRAVIDLA — POTVRZENO (implementační spec)
+================================================================================
+
+1.1) EXT both-sides režim — ZAČÁTEK
+  - Po potvrzení EXT vlny (is_ext) → both-sides okno aktivní (in_ext_range).
+  - Pozice se otevírají na obě strany; pravidla EXT platí do §1.2.
+
+1.2) EXT both-sides režim — KONEC (jen tyto způsoby)
+
+  (a) CLIMAX — stejnosměrná vlna dosáhne NOVÉHO extremu oproti EXT:
+        EXT UP  → nové HIGH nad high EXT (EXT1, EXT3, …)
+        EXT DN  → nové LOW pod low EXT (EXT4, EXT6, …)
+      → EXT režim končí v okamžiku potvrzení této vlny.
+      → Nastaví / potvrdí trend (pokračování stejným směrem).
+
+  (b) DVĚ VLNY V TRENDU po EXT — bez nutnosti nového HH/HL:
+      • 2 vlny STEJNÝM směrem jako EXT  (např. EXT3 UP → UP → UP), NEBO
+      • 2 vlny PROTI směru EXT         (např. EXT3 UP → BEAR1 → BEAR2).
+      → EXT režim končí potvrzením 2. vlny dané větve.
+      → Nastaví / potvrdí trend (continuation nebo reversal).
+
+  Obojí (a) i (b) ukončuje EXT. Mezi tím EXT běží dál.
+
+  EXT režim NEKONČÍ:
+    ✗ EXT_BOS (fib 0.35) — jen TP pozic (§1.5)
+    ✗ jedna opačná vlna (BEAR 1) — jen korekce, idx=1
+    ✗ close pod/nad mezivlnou uvnitř EXT — WAVE_BOS se tam netvoří (§1.4)
+
+1.3) Počítání — stejnosměrná vlna po EXT (s HH/HL i bez)
+
+  POVINNÉ: každá vlna ve směru parent EXT trendu dostane idx = EXT + 1
+  (EXT3 → WAVE 4, EXT6 → WAVE 7), i když NEVYTVOŘÍ nové HH/HL.
+
+  Bez nového extremu:
+    • idx = EXT + 1  (stejně jako s HH)
+    • EXT režim pokračuje — nesplněno §1.2(a)
+    • §1.2(b) se posuzuje zvlášť: počítají se vlny po EXT ve směru / proti směru
+
+  Příklad bez HH:
+    EXT3 UP → UP (bez HH nad EXT3) → idx=4, in_ext_range=True, WAVE_BOS zatím NE
+    → další UP (2. stejnosměrná po EXT) → EXT končí §1.2(b) → WAVE_BOS pod 2. UP
+
+  S mezivlnou (May 21 / May 30):
+    EXT3 UP → BEAR1 (idx=1, paralelní) → UP WAVE4
+    → idx=4 vždy; pokud WAVE4 má HH nad EXT3 → EXT končí §1.2(a) na WAVE4
+
+1.4) WAVE_BOS — jen PO ukončení EXT režimu
+
+  Uvnitř EXT (in_ext_range=True, §1.2 nesplněno):
+    • WAVE_BOS se NETVOŘÍ — ani nad BEAR1, ani pod UP bez HH.
+    • Pozice both-sides dál; flip trendu se neřeší strukturálním BOS na mezivlnách.
+    • is_bos_wave = False u BEAR1, u WAVE4 před koncem EXT.
+
+  PO ukončení EXT (§1.2a nebo §1.2b):
+    • Teprve close pod/nad vlnou, která EXT ukončila, = WAVE_BOS + flip trendu.
+
+  CESTA A — continuation (May 21 / May 30):
+    EXT3 UP → (volitelně BEAR1) → WAVE4 UP s HH nad EXT3
+    → EXT končí na WAVE4 (§1.2a)
+    → close pod WAVE4 = WAVE_BOS → flip bear
+    → nad BEAR1 NENÍ WAVE_BOS (EXT ještě běžel)
+
+  CESTA B — reversal:
+    EXT3 UP → BEAR1 (idx=1) → BEAR2 (idx=2)
+    → EXT končí na BEAR2 (§1.2b protisměr)
+    → close nad high BEAR2 = WAVE_BOS → flip UP
+
+  CESTA C — 2× stejnosměr bez HH:
+    EXT3 UP → UP (idx=4, bez HH) → UP (2. stejnosměrná po EXT)
+    → EXT končí na 2. UP (§1.2b)
+    → close pod 2. UP = WAVE_BOS
+
+  CESTA D — EXT 1 + WAVE 2 s HH (referenční graf — Jul, obr. EXT1→W2):
+    EXT 1 UP (idx=1, scenario A) → WAVE 2 UP (idx=2, HH nad high EXT 1)
+    → v okamžiku potvrzení W2: EXT končí §1.2(a), vliv EXT zrušen
+    → ext_active_wave = None, in_ext_range = False (viz §6.7)
+    → trend_bos: swing z W2 (box_bottom) pro budoucí flip
+    → volitelná BEAR korekce po W2: idx=1, is_bos_wave=False, WAVE_BOS nad ní NE
+    → close pod WAVE 2 = WAVE_BOS → flip bear
+    → wave_2_no_tp: chrání jen TP close u idx≤2, NE WAVE_BOS / flip / nové entry
+
+1.5) EXT_BOS (fib 0.35) — POUZE OBCHODNÍ VRSTVA
+  - Bere TP všech pozic ve směru parent EXT trendu (long u EXT UP…).
+  - Volitelně short entry dle engine configu.
+  - NEUKONČUJE EXT režim (§1.2).
+  - NEMĚNÍ index_in_trend / counter_up/down.
+  - ext1_protect / wave_2_no_tp: ovlivní jen close pozic, ne počítání.
+
+1.6) Po EXT_BOS — stejnosměrné / protisměrné počítání
+  - Stejnosměrná vlna: pokračuje v idx (EXT3→4, EXT6→7), NE od 1.
+  - Protisměrná vlna: paralelní větev od 1 (May 29 EXT6: UP=1 po bear EXT).
+
+1.7) První opačná vlna po EXT (continuation kontext)
+  - idx = 1 (BEAR 1 / protisměrná 1), dopředně na draw_right.
+  - is_bos_wave = False, state.direction se NEMĚNÍ (bull zůstane bull).
+  - EXT režim pokračuje — potřeba ještě §1.2(a) nebo §1.2(b).
+
+1.8) Reversal po EXT3 — souhrn
+  - 1× bear = korekce (BEAR 1), ne flip, EXT pokračuje.
+  - 2× bear = §1.2(b) protisměr → konec EXT → WAVE_BOS nad BEAR2.
+  - EXT_BOS může mezitím brát TP — nezávisle na §1.2.
+
+1.9) wave_2_no_tp (Q6)
+  - Ochrana jen idx 1 a 2 (max_index=2).
+  - WAVE 4 (idx=4) pod ochranu NESPADÁ.
+
+1.10) May 29 EXT6 (Q2 — referenční, neměnit)
+  - EXT6 DN + EXT_BOS TP; EXT režim neukončuje fib sám o sobě.
+  - Protisměr UP = 1; nový trend po 2× UP nebo DOWN od 1.
+  - Graf OK — neměnit.
+
+1.11) Příklad EXT 1 → WAVE 2 + HH — časová osa (CESTA D, potvrzeno)
+
+  Krok 1 — EXT 1 UP potvrzena
+    idx=1, in_ext_range=True, both-sides ON, ext_active_wave=EXT1
+
+  Krok 2 — WAVE 2 UP potvrzena, box_top > box_top EXT 1
+    idx=2 (EXT+1 v hlavní větvi)
+    §1.2(a) splněno → konec EXT režimu
+    ext_active_wave=None, ext1_count_window=False
+    in_ext_range=False od W2 (ext_range tracker — §6.7)
+
+  Krok 3 — (volitelně) BEAR korekce po W2, před close pod W2
+    idx=1 (protisměrná), is_bos_wave=False, direction bull
+    WAVE_BOS nad BEAR — NE (flip ještě ne)
+
+  Krok 4 — close pod box_bottom WAVE 2
+    WAVE_BOS, is_bos_wave=True na flip vlně, trend bear
+
+  POZOR — dnešní kód toto pro scenario A (EXT1) NEDĚLÁ spolehlivě:
+    • KROK 3.2 nemazá ext_active_wave při HH (climax_dir jen u scenario C)
+    • ext_range končí až po 2× stejnosměrné, ne po HH §1.2(a)
+    → nutná oprava §6.1 + §6.7 (součást Fáze 1)
+
+================================================================================
+2. CHYBA K OPRAVĚ — May 21 (ext_climax_reversal)
+================================================================================
+
+  U bear 211130 po EXT3 kód splácí čtyři věci:
+
+  ┌─────────────────────┬──────────────────────────────────────────────────────┐
+  │ Věc                 │ Správně                                              │
+  ├─────────────────────┼─────────────────────────────────────────────────────┤
+  │ index_in_trend      │ BEAR1=1, UP WAVE4=4                                  │
+  │ state.direction     │ bull zůstane u BEAR1 (NE flip)                       │
+  │ is_bos_wave         │ False u BEAR1; True až WAVE_BOS po konci EXT         │
+  │ ext_active_wave     │ aktivní přes BEAR1; konec až WAVE4 s HH (§1.2a)      │
+  └─────────────────────┴─────────────────────────────────────────────────────┘
+
+  Kód dnes (~1217): flip + is_bos_wave=True + ext_active_wave=None
+  → UP 211700 idx=1 místo 4, WAVE_BOS ~22.5 chybí.
+
+================================================================================
+3. STAVOVÝ AUTOMAT PO EXT3 (implementace §6.1)
+================================================================================
+
+  EXT3 confirmed (bull, idx=3), EXT režim aktivní, both-sides ON
+
+      │
+      ├─► 1× BEAR (BEAR1)
+      │     idx=1, is_bos_wave=False, direction=bull
+      │     EXT pokračuje — WAVE_BOS nad BEAR1 NE
+      │     │
+      │     ├─► UP WAVE4                    CESTA A (continuation)
+      │     │     idx=4 (vždy EXT+1)
+      │     │     │
+      │     │     ├─ HH nad EXT3 → EXT končí §1.2(a)
+      │     │     │   → close pod WAVE4 = WAVE_BOS
+      │     │     │
+      │     │     └─ bez HH → EXT pokračuje
+      │     │         → další UP = 2. stejnosměrná → §1.2(b) → WAVE_BOS pod 2. UP
+      │     │
+      │     └─► 2. BEAR (BEAR2)             CESTA B (reversal)
+      │           idx=2 → EXT končí §1.2(b) protisměr
+      │           → WAVE_BOS nad high BEAR2
+      │
+      ├─► hned UP WAVE4 (bez BEAR1)         CESTA A přímá
+      │
+      └─► 2× UP bez BEAR                    §1.2(b) stejnosměr
+            UP1 idx=4 → UP2 → EXT končí → WAVE_BOS pod UP2
+
+  EXT_BOS (fib 0.35) kdykoli: jen TP (§1.5), bez vlivu na automat výše.
+
+  post_ext_trend_suppressed (SEED zámek): beze změny — §8 Q4.
+
+================================================================================
+4. DIAGNOSTIKA (aktuální kód vs pravidla)
+================================================================================
+
+--- May 21 (rozbité — priorita fixu) ---
+  EXT3  210930  UP   idx=3     OK
+  BEAR  211130  DN   idx=1     seq_BOS + flip — ŠPATNĚ (má být korekce, EXT běží)
+  UP    211700  UP   idx=1     má být idx=4; HH nad EXT3 → konec EXT
+  BOS   chybí ~22.5. close pod WAVE4 low (WAVE_BOS až po §1.2a)
+
+--- May 30 (regrese — musí zůstat OK) ---
+  EXT3  292100  UP   idx=3
+  BEAR  292300  DN   idx=None  SUPP (seed zámek — §8 Q4, mimo tento fix)
+  UP    300400  UP   idx=4     WAVE4 + HH → §1.2(a)
+  BOS   301200  flip 30.5. 04:30 — WAVE_BOS po konci EXT
+
+--- May 26 (stejný bug jako May 21?) ---
+  EXT3 → bear seq_BOS → UP idx=None místo 4
+
+--- May 29 EXT6 (referenční — neměnit) ---
+  EXT6 + EXT_BOS TP; protisměr UP idx=1; graf OK
+
+================================================================================
+5. ROZDÍLY KÓD vs PRAVIDLA
+================================================================================
+
+[5.1] ext_climax_reversal_dir — 1. opačná = flip + is_bos — ŠPATNĚ (May 21)
+[5.2] KROK 3.1 — protisměr po EXT3: idx=1, bez flip, bez is_bos_wave
+[5.3] KROK 3.2 — stejnosměrná vždy counter += 1 → EXT+1 (i bez HH)
+[5.4] WAVE_BOS / klasický BOS uvnitř EXT — potlačit na mezivlnách (§1.4)
+[5.5] Konec ext_active_wave — jen §1.2(a) HH/HL nebo §1.2(b) 2 vlny stejně/proti
+[5.5b] EXT1 scenario A — climax_dir=None → HH check v KROK 3.2 CHYBÍ (CESTA D)
+[5.6] Mech B fib 0.35 — nesmí ext_active_wave = None (§6.3, fáze 2)
+[5.7] ext_range tracker — dnes jen 2× počítadlo; chybí §1.2(a) HH vs EXT extrem
+[5.8] post_ext_trend_suppressed — odloženo (§8 Q4)
+[5.9] trend_bos May 30 fix — ZACHOVAT; swing na vlně ukončující EXT (W2/W4)
+
+================================================================================
+6. NAVRHOVANÉ ZMĚNY V KÓDU
+================================================================================
+
+[6.1] wave_sequence.py — ★ HLAVNÍ (May 21 / May 26 + CESTA D EXT1)
+
+  Pending stav po EXT scénáři C:
+    • ext_post_pending, ext_post_opposite_count, ext_post_same_dir_count (nebo ekv.)
+
+  KROK 3.1 — první / druhá opačná v EXT okně:
+    • 1. opačná: idx=1, is_bos_wave=False, direction beze změny
+    • 2. opačná (bez mezilehlé stejnosměrné s HH): idx=2
+      → ext_active_wave = None (§1.2b protisměr), reversal trend
+    • NE volat ext_climax_reversal_dir pro continuation
+
+  KROK 3.2 — stejnosměrná po EXT (scénáře A, C, D — všechny EXT):
+    • counter += 1 → idx = EXT + 1 (EXT1→2, EXT3→4; i bez HH)
+    • HH/HL test vůči ext_active_wave extremu (box_top/bottom EXT vlny):
+        UP: w_box_top > ext_box_top  → §1.2(a), ukončit EXT
+        DN: w_box_bottom < ext_box_bottom → §1.2(a), ukončit EXT
+    • Při §1.2(a) na této vlně:
+        ext_active_wave = None
+        ext1_count_window = False, ext1_protect_window = False
+        (vlna W2/W4 je zároveň ukončující EXT i swing pro WAVE_BOS)
+    • Bez HH: sledovat ext_post_same_dir_count; 2. stejnosměrná po EXT
+      → ext_active_wave = None (§1.2b)
+
+  Sjednotit s climax-continuation blokem (~1116):
+    • Logiku HH sloučit — neomezovat jen na scenario C (climax_dir)
+    • Scenario A (EXT1) musí projít stejným §1.2(a) testem v KROK 3.2
+
+  BOS check (KROK před 3 / klasický):
+    • Pokud ext_active_wave != None → is_bos_wave = False (WAVE_BOS ne v EXT)
+    • WAVE_BOS až když ext_active_wave is None (EXT skončil §1.2a nebo §1.2b)
+
+[6.2] trend_bos.py — WAVE_BOS swing
+  • Zachovat May 30 fix (draw_right, in_ext swing update).
+  • Vlna ukončující EXT §1.2(a) (W2, WAVE4…) MUSÍ nastavit swing (box_bottom/top)
+    ještě na draw_right — i když tím samým krokem padá ext_active_wave.
+  • reconcile_bos_flip_map — ZACHOVAT.
+
+[6.7] ext_range.py — terminace §1.2(a) — ★ součást Fáze 1 (CESTA D)
+  • ExtRangeTracker: kromě 2× stejnosměrné (§1.2b) ukončit i při HH/HL vůči EXT:
+      stejnosměrná vlna po EXT s box_top > EXT top (UP) nebo box_bottom < EXT bottom (DN)
+  • in_ext_range=False od vlny ukončující EXT (W2 u EXT1, WAVE4 u EXT3…)
+  • Nesmí držet both-sides po §1.2(a) jen kvůli počítadlu up_waves < 2
+
+[6.3] Oddělení EXT_BOS od konce EXT — fáze 2 (po May 21 green)
+  • Mech B: fib 0.35 NENÍ ext_active_wave = None.
+  • engine _close_ext_trend_positions beze změny účelu (TP/short).
+  • ext_range: terminace jen §1.2(a)/(b).
+
+[6.4] ext_range.py — post_ext suppression ⏸ ODLOŽENO (Q4)
+
+[6.5] Testy
+  • test_may21_post_ext_continuation.py:
+      EXT3 idx=3 | BEAR1 idx=1 is_bos=False | UP idx=4
+      close-BOS ~2025-05-22 11:30 pod WAVE4
+  • test_ext1_wave2_hh_wave_bos.py (CESTA D — nový):
+      EXT1 idx=1 | W2 idx=2 HH nad EXT1 | ext_active_wave None po W2
+      bear korekce idx=1 bez WAVE_BOS | close pod W2 → WAVE_BOS flip
+  • test_may30_post_ext_bos.py — regrese
+  • Volitelně: §1.3 bez HH (2× UP), §1.2(b) 2× bear reversal
+
+[6.6] engine / live_loop parity
+  • sync_wave_sequence → reapply_ext_range_tags → sync → _recompute_bos_state
+  • Ověřit HTML May 21–22, May 30
+
+================================================================================
+7. POTVRZENÍ UŽIVATELE (souhrn)
+================================================================================
+
+  ✓ Stejnosměrná po EXT = vždy idx EXT+1 (i bez HH/HL)
+  ✓ EXT končí: (a) nové HH/HL stejnosměrně NEBO (b) 2 vlny stejně jako EXT
+    NEBO 2 vlny proti směru EXT
+  ✓ WAVE_BOS jen PO ukončení EXT — ne na BEAR1 / mezivlnách v EXT
+  ✓ EXT_BOS = jen TP pozic, ne konec EXT
+  ✓ Po EXT_BOS stejnosměr pokračuje v idx
+  ✓ BEAR1: idx=1, bez flip, bez is_bos_wave
+  ✓ May 21 CESTA A: WAVE4 HH → close pod WAVE4 = WAVE_BOS
+  ✓ CESTA D: EXT1 → W2 HH → konec EXT na W2 → close pod W2 = WAVE_BOS
+  ✓ CESTA B: 2× bear → WAVE_BOS nad BEAR2
+  ✓ w2notp jen TP u idx 1–2, neblokuje WAVE_BOS pod W2
+  ✓ EXT6 neměnit; SEED zámek odložen (Q4)
+
+================================================================================
+8. ODPOVĚDI / ODLOŽENO
+================================================================================
+
+Q2 — EXT6: graf OK; EXT_BOS TP only; protisměr od 1
+Q4 — post_ext_trend_suppressed: odloženo; _viz_q4_post_ext_suppression.html
+Q5 — Reversal: 2× bear = §1.2(b); EXT_BOS jen TP; WAVE_BOS nad BEAR2
+Q6 — w2notp max idx 2
+
+================================================================================
+9. HISTORIE REVIZÍ
+================================================================================
+
+[9.1]–[9.7] — BEAR1 pending, reversal, w2notp, EXT_BOS ≠ konec EXT
+[9.8] WAVE_BOS ne v EXT režimu na mezivlnách
+[9.9] §1.2(b): 2 vlny stejně NEBO 2 vlny proti směru EXT
+[9.10] §1.3: stejnosměr bez HH = idx EXT+1, EXT běží dál
+[9.11] CESTA D EXT1+W2+HH: konec EXT na W2, WAVE_BOS pod W2; §6.7 do Fáze 1
+
+================================================================================
+10. MAY 30 BEAR 292300 (SUPP — mimo tento fix)
+================================================================================
+
+  idx=None kvůli SEED zámku (291300), ne kvůli BEAR1 pravidlu.
+  May 21 fix neřeší suppression; zámek odložen (Q4).
+
+  Referenční continuation (regrese):
+    WAVE4 300400 idx=4 → §1.2(a) → WAVE_BOS 30.5. → Bear1 301200 idx=1
+
+================================================================================
+11. IMPLEMENTAČNÍ SCOPE
+================================================================================
+
+  FÁZE 1 (po souhlasu „proveď“):
+    ✓ §6.1 pending + KROK 3.1/3.2 + HH test (A i C) + potlačení BOS v EXT
+    ✓ §6.2 trend_bos regrese + swing na vlně ukončující EXT
+    ✓ §6.7 ext_range terminace §1.2(a) HH vs EXT extrem
+    ✓ test_may21 + test_ext1_wave2_hh + test_may30 + HTML
+
+  FÁZE 2:
+    ⏸ §6.3 EXT_BOS decoupling od ext_active_wave
+    ⏸ §6.4 SEED zámek
+    ⏸ edge: 2× UP bez HH, plná CESTA B
+
+  NEMĚNIT:
+    ✗ May 29 EXT6
+    ✗ ext_range suppression (Q4)
+
+  AKCEPTACE May 21:
+    EXT3 idx=3 | BEAR 211130 idx=1 is_bos=False direction bull
+    UP 211700 idx=4 | close-BOS ~2025-05-22 11:30 pod WAVE4 low
+
+  AKCEPTACE May 30:
+    test_may30_post_ext_bos.py green
+
+  AKCEPTACE CESTA D (EXT1 + W2 + HH):
+    EXT1 idx=1 | W2 idx=2, HH nad EXT1
+    po W2: ext_active_wave=None, in_ext_range=False
+    bear po W2: idx=1, is_bos_wave=False
+    close pod W2 low → WAVE_BOS flip bear
+
+================================================================================
+KONEC NÁVRHU
+================================================================================

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <title>Q4 — post_ext_trend_suppressed (May 29–30)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 920px; margin: 24px auto; padding: 0 16px; color: #1a1a1a; line-height: 1.45; }
+    h1 { font-size: 1.25rem; margin-bottom: 4px; }
+    .sub { color: #555; font-size: 0.9rem; margin-bottom: 20px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0 24px; font-size: 0.85rem; }
+    .legend span { display: flex; align-items: center; gap: 6px; }
+    .sw { width: 18px; height: 18px; border-radius: 3px; border: 1px solid #999; }
+    .sw-normal { background: #e8f4e8; }
+    .sw-seed { background: #fff3cd; border-color: #c9a227; }
+    .sw-supp { background: #fde8e8; border-color: #c44; }
+    .sw-ext { background: #dceeff; border-color: #369; }
+    .sw-lock { background: repeating-linear-gradient(45deg, #f5f5f5, #f5f5f5 4px, #ebebeb 4px, #ebebeb 8px); }
+
+    .timeline { position: relative; border-left: 3px solid #333; margin-left: 12px; padding-left: 0; }
+    .event { position: relative; margin-bottom: 8px; padding: 10px 12px 10px 20px; border-radius: 6px; border: 1px solid #ccc; }
+    .event::before { content: ""; position: absolute; left: -23px; top: 18px; width: 12px; height: 12px; border-radius: 50%; background: #333; border: 2px solid #fff; }
+    .event.normal { background: #e8f4e8; }
+    .event.seed { background: #fff8e1; border-color: #c9a227; }
+    .event.supp { background: #fde8e8; border-color: #c44; opacity: 0.85; }
+    .event.ext { background: #e3f2fd; border-color: #369; }
+    .event.flip { background: #eee; border-style: dashed; font-size: 0.9rem; }
+    .time { font-weight: 600; font-size: 0.8rem; color: #444; }
+    .title { font-weight: 600; margin: 2px 0; }
+    .meta { font-size: 0.82rem; color: #555; }
+    .why { font-size: 0.82rem; margin-top: 6px; padding: 6px 8px; background: rgba(255,255,255,0.7); border-radius: 4px; }
+    .zone { margin: 12px 0 12px -8px; padding: 8px 12px 8px 28px; border: 2px dashed #888; border-radius: 8px; background: #fafafa; }
+    .zone-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #666; margin-bottom: 8px; }
+    .rule { background: #f9f9f9; border: 1px solid #ddd; padding: 14px; border-radius: 8px; margin-top: 24px; font-size: 0.9rem; }
+    .rule ol { margin: 8px 0 0 1.2rem; padding: 0; }
+    .rule li { margin-bottom: 6px; }
+    .ok { color: #2a7; font-weight: 600; }
+    .bad { color: #c33; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Q4 — Která vlna je <code>post_ext_trend_suppressed</code>?</h1>
+  <p class="sub">Konkrétní příklad z backtestu (profil testing) — May 29–30 2025. Ne abstraktní pravidlo, ale reálné vlny.</p>
+
+  <div class="legend">
+    <span><i class="sw sw-ext"></i> EXT vlna</span>
+    <span><i class="sw sw-seed"></i> SEED — založí zámek směru</span>
+    <span><i class="sw sw-normal"></i> Normální vlna (počítá se, obchoduje se)</span>
+    <span><i class="sw sw-supp"></i> SUPP — potlačená (proti seed směru ve zóně)</span>
+    <span><i class="sw sw-lock"></i> Zóna zámku (bear vlny potlačeny dokud není BOS flip)</span>
+  </div>
+
+  <div class="timeline">
+    <div class="event normal">
+      <div class="time">29.5. 14:30</div>
+      <div class="title">UP vlna <code>291300</code> — idx=2</div>
+      <div class="meta">2. UP po EXT v both-sides okně → engine nastaví <strong>SEED = bull (+1)</strong></div>
+      <div class="why">Toto je spouštěč: „Po EXT trend pokračuje bull — zamkni protisměr (bear) do dalšího BOS flipu.“</div>
+    </div>
+
+    <div class="zone">
+      <div class="zone-label">Zóna zámku SEED bull (+1) — bear vlny = SUPP</div>
+
+      <div class="event ext">
+        <div class="time">29.5. 22:30</div>
+        <div class="title">EXT 3 UP <code>292100</code> — idx=3</div>
+        <div class="meta">in_ext · <span class="ok">normální</span> · není seed ani suppressed</div>
+      </div>
+
+      <div class="event supp">
+        <div class="time">30.5. 00:30</div>
+        <div class="title">BEAR vlna <code>292300</code> — měla být BEAR 1</div>
+        <div class="meta">in_ext · <span class="bad">SUPP=True</span> · idx=None (engine ji skryje / skipne entry)</div>
+        <div class="why">Směr DN jde <strong>proti SEED bull</strong> a narodila se <strong>před</strong> BOS flipem 30.5. 04:30 → dostane tag suppressed. <em>Tohle je náhodný vedlejší efekt — ne pravidlo „BEAR 1 po EXT3“.</em></div>
+      </div>
+
+      <div class="event flip">
+        <div class="time">30.5. 04:30 — close-BOS flip (bear)</div>
+        <div class="meta">Konec zámku SEED bull z 291300 · swing WAVE4 low</div>
+      </div>
+    </div>
+
+    <div class="event normal">
+      <div class="time">30.5. 06:30</div>
+      <div class="title">WAVE 4 UP <code>300400</code> — idx=4</div>
+      <div class="meta">in_ext · <span class="ok">normální</span> · stejný směr jako seed bull → <strong>není</strong> suppressed</div>
+    </div>
+
+    <div class="event seed">
+      <div class="time">30.5. 14:00</div>
+      <div class="title">BEAR 1 (WAVE_BOS) <code>301200</code> — idx=1</div>
+      <div class="meta">Nový <strong>SEED = bear (−1)</strong> po BOS pod WAVE4</div>
+      <div class="why">Nový zámek: dokud nepřijde BOS flip proti bear, UP vlny proti směru = SUPP</div>
+    </div>
+
+    <div class="zone">
+      <div class="zone-label">Zóna zámku SEED bear (−1) — UP vlny = SUPP</div>
+
+      <div class="event supp">
+        <div class="time">30.5. 16:30</div>
+        <div class="title">UP vlna <code>301530</code></div>
+        <div class="meta"><span class="bad">SUPP=True</span> · idx=None · UP proti seed bear</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rule">
+    <strong>Jednoduché pravidlo (3 kroky):</strong>
+    <ol>
+      <li><strong>SEED vlna</strong> — vznikne když po EXT jsou <em>2 vlny stejného směru</em> (ext_post_trend_seed_dir = +1 nebo −1). Na grafu: žlutý box 29.5. 14:30 a 30.5. 14:00.</li>
+      <li><strong>Zámek</strong> — od SEED vlny až do <em>prvního close-BOS flipu proti seed směru</em> jsou vlny <strong>protisměrné seedu</strong> označené SUPP.</li>
+      <li><strong>SUPP vlna</strong> — engine ji při obchodování přeskočí; ve vizuálu často bez čísla. <em>Po opravě May 21: idx by se měl počítat i tak (Q4 doporučení).</em></li>
+    </ol>
+    <p style="margin-top:12px"><strong>Co NENÍ suppressed:</strong> vlny ve směru seedu (bull UP když seed=+1), EXT vlny samotné, vlny narozené <em>po</em> BOS flipu co zámek ukončí.</p>
+    <p><strong>May 21 bear 211130</strong> — <span class="ok">SUPP=False</span> (žádný aktivní bull seed v tom okně) → problém není suppression, ale ext_climax_reversal (špatný BOS flip).</p>
+  </div>
+</body>
+</html>
