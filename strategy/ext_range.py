@@ -403,35 +403,14 @@ def _collect_trend_bos_flip_bars(
     if df is None or getattr(df, "empty", False) or not waves or not wave_birth:
         return set()
 
-    from strategy.trend_bos import (
-        _apply_bos_close_flip,
-        _maybe_seed_state_from_ext_post_trend,
-        maybe_update_trend_state_with_wave,
-    )
+    from strategy.trend_bos import _detect_close_bos_timeline_flips
 
-    waves_by_birth_bar: dict[int, list[dict]] = {}
-    for w in waves:
-        birth = wave_birth.get(str(w.get("wave_time", "")))
-        if birth is None:
-            continue
-        waves_by_birth_bar.setdefault(int(birth), []).append(w)
-
-    state = TrendState()
-    closes = df["close"].astype(float).to_numpy()
-    flip_bars: set[int] = set()
-
-    for i in range(len(df)):
-        bar_close = float(closes[i])
-        prev_dir = state.direction
-        state = _apply_bos_close_flip(state, bar_close)
-        if state.direction != prev_dir and state.direction in ("bull", "bear"):
-            flip_bars.add(i)
-
-        for w in waves_by_birth_bar.get(i, []):
-            state = _maybe_seed_state_from_ext_post_trend(state, w)
-            maybe_update_trend_state_with_wave(state, w, cfg)
-
-    return flip_bars
+    return {
+        int(fb)
+        for fb, _ft in _detect_close_bos_timeline_flips(
+            df, waves, cfg, wave_birth_bars=wave_birth
+        )
+    }
 
 
 def _apply_post_ext_trend_suppression(

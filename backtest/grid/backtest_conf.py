@@ -323,14 +323,14 @@ PROFILES["testing"] = {
     "grid": [
         {
 # ============== MARKET SETTING ==============
-            "date_from": ["2025-05-10"],
+            "date_from": ["2025-05-10"],    # "2024-05-10" , "2025-05-10"
             "date_to":   ["2025-10-10"],    # "2025-10-10" , "2026-06-10"
             "timeframe": ["M30"],
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": [0.26],
             "rrr": [2.0],
-            "tp_mode": ["wave_target_n"],
+            "tp_mode": ["wave_target_n"], # "bos_exit", "rrr_fixed", "wave_target_n", "wave_target_n_g"
             "tp_target_wave_index": [4],
             "wave_extension_pct": [0.10],
             "bos_entry_in_rrr_fixed": [True],
@@ -368,18 +368,18 @@ PROFILES["testing"] = {
             "wave_position_enabled": [True],
             "wave_positions_only": [False],  # jen klasické WAVE, ostatní moduly vynuceně off
             "wave_isolation_study": [False],  # engine plná simulace, report = WAVE slice — never turn off
-            "wave_counter_two_sided_enabled": [True, False],
+            "wave_counter_two_sided_enabled": [True],
             "two_sided_entry_min_wave_pct": [0.55],
             "skip_primary_entry_on_parent_wave_enable": [True],
             "wf_enabled": [True],
-            "pp_enabled": [False, True],
+            "pp_enabled": [True],
             "pp_sl_pct": [0.21],
             "pp_disabled_in_ext_context": [True],
 
 # ============== TREND FILTER & BOS ==============
             "trend_filter_enabled": [True],
             "trend_hh_hl_filter_enabled": [True],
-            "bos_entry_enable": [False, True],
+            "bos_entry_enable": [True],
             "wave_size_sl_ladder_base_pct": [0.21],
             "wave_size_sl_ladder_step_pct": [0.16],
             "wave_size_sl_ladder_band_size_pct": [0.50],

@@ -851,15 +851,40 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
             else:
                 trend_states_per_wave = {}
 
-            # BOS vlna (zpusobi close-based flip trendu) — vstupove dostupna i
-            # kdyz je proti aktualnimu trendu / mimo HH/HL strukturu. Vystup
-            # je nezavisly na `tp_mode` a `last_known_trend_dir`.
+            # BOS vlna — po finalnich EXT tagach a wave_sequence (viz engine).
+            seq_info, protected_waves = sync_wave_sequence_state(df, waves, cfg)
+
+            from strategy.ext_range import ext_range_enabled, reapply_ext_range_tags
+            from strategy.wave_detection_pine import compute_wave_birth_bars_pine
+            from strategy.trend_bos import (
+                _detect_close_bos_timeline_flips,
+                reconcile_bos_flip_map_with_wave_sequence,
+            )
+
+            _wave_birth_by_time = compute_wave_birth_bars_pine(df, cfg)
+            if ext_range_enabled(cfg):
+                reapply_ext_range_tags(
+                    waves, cfg, df=df, wave_birth=_wave_birth_by_time
+                )
+                seq_info, protected_waves = sync_wave_sequence_state(df, waves, cfg)
+
+            _bos_flip_map_live: dict[int, str] = {}
             if cfg.trend_filter_enabled:
-                bos_wave_times = compute_bos_wave_times(df, waves, cfg)
+                _flips = _detect_close_bos_timeline_flips(
+                    df, waves, cfg, wave_birth_bars=_wave_birth_by_time
+                )
+                _bos_flip_map_live = reconcile_bos_flip_map_with_wave_sequence(
+                    compute_bos_wave_flip_map(
+                        df, waves, cfg, wave_birth_bars=_wave_birth_by_time
+                    ),
+                    _flips,
+                    waves,
+                    seq_info,
+                    _wave_birth_by_time,
+                )
+                bos_wave_times = set(_bos_flip_map_live.values())
             else:
                 bos_wave_times = set()
-
-            seq_info, protected_waves = sync_wave_sequence_state(df, waves, cfg)
 
             ext_runtime.refresh_simulation(
                 df, cfg, seq_info=seq_info, protected_waves=protected_waves, waves=waves,
@@ -996,7 +1021,11 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 _flip_bar_ix = last_bar_idx
                 if _close_bos_flip is not None:
                     _flip_bar_ix = int(_close_bos_flip[2])
-                _bos_flip_map = compute_bos_wave_flip_map(df, waves, cfg)
+                _bos_flip_map = (
+                    _bos_flip_map_live
+                    if _bos_flip_map_live
+                    else compute_bos_wave_flip_map(df, waves, cfg)
+                )
                 _wt_bos = _bos_flip_map.get(int(_flip_bar_ix))
                 if _wt_bos:
                     _bos_protect_wave_time = str(_wt_bos)

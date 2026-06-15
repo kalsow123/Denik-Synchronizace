@@ -37,6 +37,13 @@ def _visual_exception(w: dict, eng: BacktestEngine, cfg) -> bool:
         return True
     if w.get("in_ext_range") and getattr(cfg, "ext_trade_both_sides_in_range", False):
         return True
+    lock_dir = w.get("post_ext_confirmed_trend_dir")
+    if (
+        w.get("post_ext_confirmed_trend_lock")
+        and lock_dir in (1, -1)
+        and int(w.get("dir", 0) or 0) == int(lock_dir)
+    ):
+        return True
     return False
 
 
@@ -72,4 +79,10 @@ def test_live_config_visual_wave_count_and_no_counter_trend_leaks():
         and not (w.get("in_ext_range") and both_sides)
         for w in vis
     )
-    assert not any(w.get("post_ext_confirmed_trend_lock") for w in vis)
+    # Lock vlny ve směru potvrzeného trendu smí být ve visual setu (HTML).
+    assert not any(
+        w.get("post_ext_confirmed_trend_lock")
+        and int(w.get("dir", 0) or 0)
+        != int(w.get("post_ext_confirmed_trend_dir") or 0)
+        for w in vis
+    )

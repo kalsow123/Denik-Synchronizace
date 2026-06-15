@@ -43,6 +43,8 @@ from strategy.trend_bos import (
     build_pp_trend_confirmed_per_bar,
     find_pp_candidate_wave,
     pp_wave_eligible_for_break,
+    _detect_close_bos_timeline_flips,
+    reconcile_bos_flip_map_with_wave_sequence,
     _wave_is_wf_origin,
     entry_allowed_at_fill_bar,
     resolve_effective_tp,
@@ -573,26 +575,6 @@ class BacktestEngine:
         else:
             self.trend_states_per_wave = {}
 
-        # BOS vlna (zpusobi close-based flip trendu) — vzdy povolena vstupem
-        # i vykreslena, i kdyz HH/HL filter ji jinak zamita. Pocita se nad
-        # vsemi vlnami (i bez `trend_filter_enabled`), protoze vizual
-        # pracuje stejne nezavisle na filtru.
-        flip_map = compute_bos_wave_flip_map(
-            df, all_waves, cfg, wave_birth_bars=wave_birth
-        )
-        wt_to_wave = {w["wave_time"]: w for w in all_waves}
-        self._bos_flip_wave_by_bar = {
-            int(bar_ix): wt_to_wave[wt]
-            for bar_ix, wt in flip_map.items()
-            if wt in wt_to_wave
-        }
-        self._bos_wave_times = set(flip_map.values())
-
-        # TP MODE: BOS_EXIT / BOS_EXIT_PRIORITY / WAVE_TARGET_N — per-bar trend
-        # timeline pro flip. Pokud je zapnuto PP (cfg.pp_enabled), potrebujeme
-        # trend_states_per_bar take, i kdyz tp_mode je RRR_FIXED.
-        # pending_cancel_mode = "trend" tez vyzaduje per-bar trend timeline,
-        # aby mohl rusit pendingy na BOS flipu i mimo BOS_EXIT-like tp_modes.
         need_per_bar = (
             tp_mode_uses_bos_per_bar_exit(cfg)
             or bool(getattr(cfg, "pp_enabled", False))
@@ -600,24 +582,19 @@ class BacktestEngine:
             or getattr(cfg, "trend_filter_enabled", False)
             or bos_entry_in_rrr_fixed_enabled(cfg)
         )
-        if need_per_bar:
-            self.trend_states_per_bar = compute_trend_states_per_bar(df, all_waves, cfg)
-            self._close_bos_flip_bar_indices = compute_close_based_bos_flip_bar_indices(
-                df, all_waves, cfg
-            )
-            if bool(getattr(cfg, "pp_enabled", False)):
-                self._pp_trend_confirmed_per_bar = build_pp_trend_confirmed_per_bar(
-                    df, all_waves, cfg, self.trend_states_per_bar
-                )
-            else:
-                self._pp_trend_confirmed_per_bar = []
-        else:
-            self.trend_states_per_bar = []
-            self._close_bos_flip_bar_indices = set()
-            self._pp_trend_confirmed_per_bar = []
+        self._need_per_bar_trend = need_per_bar
 
         self._all_waves = all_waves
         self._sync_wave_sequence_state()
+
+        from strategy.ext_range import ext_range_enabled, reapply_ext_range_tags
+
+        if ext_range_enabled(cfg):
+            reapply_ext_range_tags(all_waves, cfg, df=df, wave_birth=wave_birth)
+            self._sync_wave_sequence_state()
+
+        self._recompute_bos_state(df, all_waves, wave_birth)
+
         if not self.waves_by_wave_time:
             self.waves_by_wave_time = {w["wave_time"]: w for w in all_waves}
         self._two_sided_tracker = TwoSidedTracker()
@@ -1077,7 +1054,7 @@ class BacktestEngine:
             )
             self.last_waves = merged
             # Zde se jiz nevola reapply_ext_range_tags, protoze se vola hned po detekci v wave_detection_pine.py
-            self.last_waves_for_visual = self._build_waves_for_visual(merged)
+            self.last_waves_for_visual = self._build_waves_for_visual(merged, df)
             self.wave_birth_by_time = dict(wave_birth)
             for _wf_vis in self._wf_visual_waves:
                 _wf_wt = _wf_vis.get("wave_time")
@@ -1119,9 +1096,60 @@ class BacktestEngine:
         }
         self.waves_by_wave_time = {w["wave_time"]: w for w in all_waves}
 
-    def _build_waves_for_visual(self, waves: List[dict]) -> List[dict]:
+    def _recompute_bos_state(
+        self,
+        df: pd.DataFrame,
+        all_waves: List[dict],
+        wave_birth: dict,
+    ) -> None:
+        """BOS flip mapa + per-bar trend po finalnich EXT tagach a wave_sequence."""
+        cfg = self.cfg
+        flips = _detect_close_bos_timeline_flips(
+            df, all_waves, cfg, wave_birth_bars=wave_birth
+        )
+        flip_map = compute_bos_wave_flip_map(
+            df, all_waves, cfg, wave_birth_bars=wave_birth
+        )
+        flip_map = reconcile_bos_flip_map_with_wave_sequence(
+            flip_map,
+            flips,
+            all_waves,
+            self.wave_sequence_info,
+            wave_birth,
+        )
+        wt_to_wave = {w["wave_time"]: w for w in all_waves}
+        self._bos_flip_wave_by_bar = {
+            int(bar_ix): wt_to_wave[wt]
+            for bar_ix, wt in flip_map.items()
+            if wt in wt_to_wave
+        }
+        self._bos_wave_times = set(flip_map.values())
+
+        need_per_bar = bool(getattr(self, "_need_per_bar_trend", False))
+        if need_per_bar:
+            self.trend_states_per_bar = compute_trend_states_per_bar(
+                df, all_waves, cfg
+            )
+            self._close_bos_flip_bar_indices = compute_close_based_bos_flip_bar_indices(
+                df, all_waves, cfg
+            )
+            if bool(getattr(cfg, "pp_enabled", False)):
+                self._pp_trend_confirmed_per_bar = build_pp_trend_confirmed_per_bar(
+                    df, all_waves, cfg, self.trend_states_per_bar
+                )
+            else:
+                self._pp_trend_confirmed_per_bar = []
+        else:
+            self.trend_states_per_bar = []
+            self._close_bos_flip_bar_indices = set()
+            self._pp_trend_confirmed_per_bar = []
+
+    def _build_waves_for_visual(self, waves: List[dict], df: pd.DataFrame | None = None) -> List[dict]:
         """Vlny pro HTML vizual — filtr podle flagu z detekce (ne re-simulace trendu)."""
-        from backtest.visual_wave_filter import wave_passes_visual_filter
+        from backtest.visual_wave_filter import (
+            merge_lock_trend_segments_for_visual,
+            wave_passes_visual_filter,
+        )
 
         cfg = self.cfg
         bos_times: set[str] = set(self._bos_wave_times or ())
@@ -1145,8 +1173,10 @@ class BacktestEngine:
                 bos_wave_times=bos_times,
                 wf_visual_wave_times=wf_vis_times,
                 two_sided_fired_times=two_sided_times,
+                include_lock_trend_waves=True,
             ):
                 out.append(w)
+        out = merge_lock_trend_segments_for_visual(out, df, cfg)
         self._visual_bos_wave_times = bos_times
         return out
 

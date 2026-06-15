@@ -24,6 +24,7 @@ GRID_SHEET_RANKING = "ranking"  # legacy název; nově Ranking_<PRESET>
 GRID_SHEET_CHYBY = "chyby"
 GRID_SHEET_DDI_EPIZODY = "ddi_epizody"
 RANKING_SHEET_PREFIX = "Ranking_"
+_DDI_EPIZODE_VALUE_PREFIX = "DDi"
 _LARGE_SHEET_FAST_THRESHOLD = 2000
 
 # Tučné sloupce na listu Ranking_<PRESET> (backtest_risk_usd není tučně).
@@ -200,6 +201,35 @@ def _col_index(headers: list, name: str) -> Optional[int]:
         return headers.index(name) + 1
     except ValueError:
         return None
+
+
+def _is_ddi_episode_value_column(col_name: str) -> bool:
+    """Sloupce DDi1, DDi2, … (hodnota min. drawdownu v epizodě)."""
+    name = str(col_name)
+    if not name.startswith(_DDI_EPIZODE_VALUE_PREFIX):
+        return False
+    suffix = name[len(_DDI_EPIZODE_VALUE_PREFIX) :]
+    return suffix.isdigit() and int(suffix) >= 1
+
+
+def _ddi_episode_value_columns(headers: list) -> frozenset[str]:
+    return frozenset(c for c in headers if _is_ddi_episode_value_column(c))
+
+
+def _apply_ddi_epizody_sheet_format(ws, df: pd.DataFrame) -> None:
+    """List ddi_epizody: tučně hodnoty ve sloupcích DDi1, DDi2, …"""
+    from openpyxl.styles import Font
+
+    headers = list(df.columns)
+    bold = Font(bold=True)
+    ddi_cols = _ddi_episode_value_columns(headers)
+
+    for col_idx, col_name in enumerate(headers, start=1):
+        if col_name not in ddi_cols:
+            continue
+        ws.cell(row=1, column=col_idx).font = bold
+        for row_idx in range(2, ws.max_row + 1):
+            ws.cell(row=row_idx, column=col_idx).font = bold
 
 
 def _apply_ranking_sheet_format(ws, df: pd.DataFrame) -> None:
@@ -471,6 +501,14 @@ def export_grid_workbook(
                 bold_columns=frozenset(),
             )
             _apply_summaries_sheet_format(ws, prepared)
+        elif safe_name == GRID_SHEET_DDI_EPIZODY:
+            _apply_sheet_layout(
+                ws,
+                prepared,
+                bot_name_width_scale=width_factor,
+                bold_columns=frozenset(),
+            )
+            _apply_ddi_epizody_sheet_format(ws, prepared)
         else:
             sheet_bold = bold_columns
             if sheet_name == GRID_SHEET_PROP_FIRM and sheet_bold is None:

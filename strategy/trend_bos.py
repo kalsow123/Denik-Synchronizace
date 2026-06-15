@@ -362,6 +362,165 @@ def _maybe_seed_state_from_ext_post_trend(state: TrendState, wave: dict) -> Tren
     return state
 
 
+def _build_waves_by_extreme_bar(waves: List[dict], n: int) -> Dict[int, List[dict]]:
+    """Index vln podle baru extremu (`draw_right`) — stejne jako wave_sequence."""
+    out: Dict[int, List[dict]] = {}
+    for w in waves:
+        try:
+            dr = int(w["draw_right"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if dr < 0 or dr >= n:
+            continue
+        out.setdefault(dr, []).append(w)
+    return out
+
+
+def _advance_bos_timeline_bar(
+    state: TrendState,
+    bar_close: float,
+    bar_ix: int,
+    *,
+    cfg: BotConfig,
+    waves_by_extreme_bar: Dict[int, List[dict]],
+    waves_by_birth_bar: Dict[int, List[dict]],
+    birth_dir_last_seen: Optional[Dict[int, str]] = None,
+) -> tuple[TrendState, int]:
+    """
+    Jeden bar BOS timeline: close flip, pak swing update na draw_right,
+    pak seed + doplneni na birth (bez dvojite aplikace na stejnem baru).
+
+    Sjednocuje `compute_trend_states_per_wave`, flip mapu a close-flip iteraci.
+    """
+    if birth_dir_last_seen is not None:
+        for w in waves_by_birth_bar.get(bar_ix, []):
+            if bool(w.get("post_ext_trend_suppressed", False)):
+                continue
+            wdir = int(w.get("dir", 0))
+            if wdir in (1, -1):
+                birth_dir_last_seen[wdir] = str(w["wave_time"])
+
+    flipped_to, state = _bos_close_flip_with_forgive(state, bar_close)
+
+    for w in waves_by_extreme_bar.get(bar_ix, []):
+        if bool(w.get("post_ext_trend_suppressed", False)):
+            continue
+        maybe_update_trend_state_with_wave(state, w, cfg)
+
+    for w in waves_by_birth_bar.get(bar_ix, []):
+        state = _maybe_seed_state_from_ext_post_trend(state, w)
+        if bool(w.get("post_ext_trend_suppressed", False)):
+            continue
+        try:
+            dr = int(w.get("draw_right", bar_ix))
+        except (TypeError, ValueError):
+            dr = bar_ix
+        if dr != bar_ix:
+            maybe_update_trend_state_with_wave(state, w, cfg)
+
+    return state, flipped_to
+
+
+def _detect_close_bos_timeline_flips(
+    df: pd.DataFrame,
+    waves: List[dict],
+    cfg: BotConfig,
+    *,
+    wave_birth_bars: Optional[Dict[str, int]] = None,
+) -> List[tuple[int, int]]:
+    """Seznam (flip_bar, flipped_to) kde flipped_to je 1=bull, -1=bear."""
+    if df is None or df.empty or not waves:
+        return []
+
+    if wave_birth_bars is None:
+        wave_birth_bars = compute_wave_birth_bars_pine(df, cfg)
+
+    n = len(df)
+    waves_by_birth_bar: Dict[int, List[dict]] = {}
+    for w in waves:
+        birth = wave_birth_bars.get(w["wave_time"])
+        if birth is None:
+            continue
+        waves_by_birth_bar.setdefault(int(birth), []).append(w)
+    waves_by_extreme_bar = _build_waves_by_extreme_bar(waves, n)
+
+    state = TrendState()
+    closes = df["close"].astype(float).to_numpy()
+    flips: List[tuple[int, int]] = []
+
+    for i in range(n):
+        state, flipped_to = _advance_bos_timeline_bar(
+            state,
+            float(closes[i]),
+            i,
+            cfg=cfg,
+            waves_by_extreme_bar=waves_by_extreme_bar,
+            waves_by_birth_bar=waves_by_birth_bar,
+        )
+        if flipped_to != 0:
+            flips.append((i, flipped_to))
+
+    return flips
+
+
+def reconcile_bos_flip_map_with_wave_sequence(
+    flip_map: Dict[int, str],
+    flips: List[tuple[int, int]],
+    waves: List[dict],
+    wave_sequence_info: Dict[str, Any],
+    wave_birth_bars: Dict[str, int],
+    *,
+    max_bars_after_flip: int = 32,
+) -> Dict[int, str]:
+    """
+    Doplni / opravi BOS atribuci podle `wave_sequence_info.is_bos_wave`.
+
+    Phase B flip mapy muze pripsat starou protisměrnou vlnu (napr. pred WAVE4
+    break); wave_sequence zna skutecnou BOS seed vlnu noveho trendu.
+    """
+    if not flips or not wave_sequence_info:
+        return dict(flip_map)
+
+    wt_to_dir = {str(w.get("wave_time", "")): int(w.get("dir", 0)) for w in waves}
+    flip_by_bar = {int(fb): int(ft) for fb, ft in flips}
+    out = dict(flip_map)
+
+    for wt_raw, info in wave_sequence_info.items():
+        wt = str(wt_raw)
+        if not getattr(info, "is_bos_wave", False):
+            continue
+        if wt in out.values():
+            continue
+        try:
+            birth = int(wave_birth_bars[wt])
+        except (KeyError, TypeError, ValueError):
+            continue
+        wdir = wt_to_dir.get(wt)
+        if wdir not in (1, -1):
+            continue
+
+        best_flip: Optional[int] = None
+        for fb in sorted(flip_by_bar):
+            if fb >= birth:
+                break
+            if flip_by_bar[fb] != wdir:
+                continue
+            if birth - fb <= int(max_bars_after_flip):
+                best_flip = fb
+
+        if best_flip is None:
+            continue
+
+        old_wt = out.get(best_flip)
+        if old_wt is not None and old_wt != wt:
+            old_info = wave_sequence_info.get(str(old_wt))
+            if getattr(old_info, "is_bos_wave", False):
+                continue
+        out[best_flip] = wt
+
+    return out
+
+
 def compute_bos_wave_flip_map(df: pd.DataFrame,
                               waves: List[dict],
                               cfg: BotConfig,
@@ -393,30 +552,9 @@ def compute_bos_wave_flip_map(df: pd.DataFrame,
             continue
         waves_by_birth_bar.setdefault(int(birth), []).append(w)
 
-    state = TrendState()
-    closes = df["close"].astype(float).to_numpy()
-    last_seen_by_dir: Dict[int, str] = {}
-    # FAZE A — detekce flipu (bar + smer). Timing/smer flipu se NEMENI; je
-    # identicka s puvodni logikou (trend timeline, BOS-exit, pending-cancel
-    # zustavaji netknute). Atribuci konkretni vlny resi az faze B.
-    flips: List[tuple[int, int]] = []
-
-    for i in range(len(df)):
-        bar_close = float(closes[i])
-
-        for w in waves_by_birth_bar.get(i, []):
-            if bool(w.get("post_ext_trend_suppressed", False)):
-                continue
-            last_seen_by_dir[int(w.get("dir", 0))] = str(w["wave_time"])
-
-        flipped_to, state = _bos_close_flip_with_forgive(state, bar_close)
-
-        if flipped_to != 0:
-            flips.append((i, flipped_to))
-
-        for w in waves_by_birth_bar.get(i, []):
-            state = _maybe_seed_state_from_ext_post_trend(state, w)
-            maybe_update_trend_state_with_wave(state, w, cfg)
+    flips = _detect_close_bos_timeline_flips(
+        df, waves, cfg, wave_birth_bars=wave_birth_bars
+    )
 
     # FAZE B — pro kazdy flip vyber BOS-vlnu = nejnovejsi strukturalni vlnu ve
     # smeru noveho trendu, jejiz IMPULZ (draw_left) zacal nejpozdeji na baru
@@ -787,6 +925,14 @@ def should_update_trend_state_for_wave(state: TrendState,
     wdir = int(wave["dir"])
     if state.direction == "neutral":
         return True
+    # EXT both-sides: trend-dir vlna v okne aktualizuje BOS swing i bez HH/HL
+    # (napr. WAVE4 po EXT3 — jinak zustane stary lub a chybi close-BOS flip).
+    if bool(wave.get("in_ext_range", False)):
+        if wdir == 1 and state.direction == "bull":
+            return True
+        if wdir == -1 and state.direction == "bear":
+            return True
+        return False
     if wdir == 1 and state.direction == "bull":
         if state.last_up_box_top is not None and _wave_move_pct_below_swing_threshold(
             wave, cfg
@@ -1125,25 +1271,22 @@ def compute_trend_states_per_bar(df: pd.DataFrame,
             continue
         waves_by_birth_bar.setdefault(int(birth), []).append(w)
 
+    n = len(df)
+    waves_by_extreme_bar = _build_waves_by_extreme_bar(waves, n)
     state = TrendState()
     states: List[TrendState] = []
-    closes, _times, n = _trend_market_arrays(df)
+    closes, _times, _n = _trend_market_arrays(df)
 
     for i in range(n):
         bar_close = float(closes[i])
-
-        # 1) BOS — pri prurazu close pres swing level resetuj historii a otoc smer
-        state = _apply_bos_close_flip(state, bar_close)
-        # neutral: BOS neni mozny, swing levels chybi
-
-        # 2) Vlny narozene na tomto baru — aktualizuj `last_*` (mohou flipnout
-        # neutral → bull/bear pri prvni potvrzeni)
-        new_waves = waves_by_birth_bar.get(i)
-        if new_waves:
-            for w in new_waves:
-                state = _maybe_seed_state_from_ext_post_trend(state, w)
-                maybe_update_trend_state_with_wave(state, w, cfg)
-
+        state, _flipped_to = _advance_bos_timeline_bar(
+            state,
+            bar_close,
+            i,
+            cfg=cfg,
+            waves_by_extreme_bar=waves_by_extreme_bar,
+            waves_by_birth_bar=waves_by_birth_bar,
+        )
         states.append(replace(state))
 
     return states
@@ -1177,6 +1320,8 @@ def iter_close_based_bos_flips(
             continue
         waves_by_birth_bar.setdefault(int(birth), []).append(w)
 
+    n = len(df)
+    waves_by_extreme_bar = _build_waves_by_extreme_bar(waves, n)
     state = TrendState()
     closes, times, n = _trend_market_arrays(df)
 
@@ -1212,12 +1357,20 @@ def iter_close_based_bos_flips(
         bar_close = float(closes[i])
         t = _time_at(times, i)
 
-        # Pred flipem snapshot swing levelu (po forgive se vynuluje).
         prev_up_bottom = state.last_up_box_bottom
         prev_down_top = state.last_down_box_top
         prev_up_wt = state.last_up_wave_time
         prev_down_wt = state.last_down_wave_time
-        flipped_to, state = _bos_close_flip_with_forgive(state, bar_close)
+
+        state, flipped_to = _advance_bos_timeline_bar(
+            state,
+            bar_close,
+            i,
+            cfg=cfg,
+            waves_by_extreme_bar=waves_by_extreme_bar,
+            waves_by_birth_bar=waves_by_birth_bar,
+        )
+
         if flipped_to == -1:
             t0 = _segment_start_time(prev_up_wt)
             if t0 is None:
@@ -1227,7 +1380,7 @@ def iter_close_based_bos_flips(
                 t,
                 "bear",
                 "BOS: close pod UP low → bear",
-                float(prev_up_bottom),
+                float(prev_up_bottom) if prev_up_bottom is not None else 0.0,
                 t0,
             )
         elif flipped_to == 1:
@@ -1239,15 +1392,9 @@ def iter_close_based_bos_flips(
                 t,
                 "bull",
                 "BOS: close nad DOWN high → bull",
-                float(prev_down_top),
+                float(prev_down_top) if prev_down_top is not None else 0.0,
                 t0,
             )
-
-        new_waves = waves_by_birth_bar.get(i)
-        if new_waves:
-            for w in new_waves:
-                state = _maybe_seed_state_from_ext_post_trend(state, w)
-                maybe_update_trend_state_with_wave(state, w, cfg)
 
 
 def compute_close_based_bos_flip_bar_indices(

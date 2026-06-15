@@ -62,10 +62,13 @@ def test_post_ext_confirmed_lock_blocks_subsequent_waves():
     assert by_wt[wt_up_locked].get("post_ext_confirmed_trend_lock") is True
     assert by_wt[wt_dn_locked].get("post_ext_confirmed_trend_lock") is True
 
-    # Overime, ze html vykreslovac by je skryl
+    # HTML: trend-směr lock vlny viditelné, protisměr skrytý; runtime entry beze změny.
     from backtest.waves_plotly_figure import _wave_visible_in_html_plot
+
+    assert by_wt[wt_up_locked].get("post_ext_confirmed_trend_dir") == -1
+    assert by_wt[wt_dn_locked].get("post_ext_confirmed_trend_dir") == -1
     assert _wave_visible_in_html_plot(by_wt[wt_up_locked], cfg) is False
-    assert _wave_visible_in_html_plot(by_wt[wt_dn_locked], cfg) is False
+    assert _wave_visible_in_html_plot(by_wt[wt_dn_locked], cfg) is True
 
     # Overime, ze wave_allowed_for_entry by pro ne v live_loopu vratilo false
     from strategy.trend_bos import wave_allowed_for_entry

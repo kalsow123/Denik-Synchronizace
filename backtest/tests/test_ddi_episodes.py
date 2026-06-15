@@ -236,6 +236,50 @@ def test_workbook_includes_ddi_epizody_sheet():
     assert ddi.loc[0, "DDi1"] == -13.4
 
 
+@pytest.mark.skipif(
+    not pytest.importorskip("openpyxl", reason="openpyxl required"),
+    reason="openpyxl",
+)
+def test_ddi_epizody_sheet_bolds_ddi_columns(tmp_path):
+    from backtest.io.excel_export import GRID_SHEET_DDI_EPIZODY, export_grid_workbook
+
+    df = pd.DataFrame(
+        [
+            {
+                "combo_no": 1,
+                "RRR_TP": "WAVE N=4",
+                "trades": 10,
+                "profit_factor": 0.95,
+                "max_dd_%_vs_initial": -13.4,
+                "dnu_testu_celkem": 151,
+                "DD1_zacatek": "2025-06-20",
+                "DD1_konec": "OTEVRENO",
+                "DDi1": -13.4,
+                "DD2_zacatek": "2025-08-01",
+                "DD2_konec": "2025-09-01",
+                "DDi2": -11.0,
+                "pocet_epizod_ge10pct": 2,
+            }
+        ]
+    )
+    path = tmp_path / "grid_report.xlsx"
+    assert export_grid_workbook(path, {GRID_SHEET_DDI_EPIZODY: df})
+
+    from openpyxl import load_workbook
+
+    ws = load_workbook(path)[GRID_SHEET_DDI_EPIZODY]
+    headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+    ix_ddi1 = headers.index("DDi1") + 1
+    ix_ddi2 = headers.index("DDi2") + 1
+    ix_dd1_zac = headers.index("DD1_zacatek") + 1
+
+    assert ws.cell(1, ix_ddi1).font.bold is True
+    assert ws.cell(1, ix_ddi2).font.bold is True
+    assert ws.cell(2, ix_ddi1).font.bold is True
+    assert ws.cell(2, ix_ddi2).font.bold is True
+    assert ws.cell(2, ix_dd1_zac).font.bold is not True
+
+
 def test_daily_ddi_series_forward_fill():
     df = _trades(
         [

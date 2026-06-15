@@ -174,6 +174,7 @@ def _wave_visible_in_html_plot(
         wave,
         cfg,
         bos_wave_times=bos_wave_times or set(),
+        include_lock_trend_waves=True,
     )
 
 
