@@ -100,7 +100,8 @@ class BotConfig:
     wave_position_enabled: bool = True  # klasické vlny zapnuté/vypnuté
     wave_positions_only: bool = False  # jen klasické WAVE; ostatní moduly vynuceně off (viz position_modes)
     wave_counter_two_sided_enabled: bool = False  # master: WAVE_COUNTER + WAVE_TWO_SIDED
-    wave_isolation_study: bool = False  # grid metadata; engine flag nepouzivat (viz translator)
+    wave_isolation_study: bool = False  # grid metadata; live MT5 slice viz live_mt5_wave_slice_only
+    live_mt5_wave_slice_only: bool = False  # runtime: MT5 smi otevírat jen WAVE (apply_live_mt5_wave_slice_execution)
     two_sided_entry_enabled: bool = False
     two_sided_entry_min_wave_pct: float = 0.55
     skip_primary_entry_on_parent_wave_enable: bool = True  # preskocit primarni WAVE vstup na two-sided rodici A; jen protipozice na protivlni B
@@ -153,7 +154,7 @@ class BotConfig:
     retry_market_attempts: int = 2
     retry_pending_attempts: int = 3
     retry_backoff_sec: float = 0.35   # time (cislo = sekundy)
-    equity_target_usd: float | None = None
+    equity_target_usd: float | None = None  # po předepsaném targetu PNL bot zavře všechny pozice a vypne se.
     adx14_change_normalizer_json: str = "runtime/adx14_normalizer.json"
     adx14_change_html_path: str = "results/live_adx14_change.html"
     adx14_change_threshold: float = 1.3  # viz poznámka výše; gate = adx14_disable_threshold
@@ -240,7 +241,8 @@ class BotConfig:
 
 # LIVE_BOT_CONFIG — grid EXAMPLE combo_no 2 (2025-11-10 .. 2026-05-09, w2notpFalse).
 # Runtime engine: resolve_grid_engine_config() — plna simulace (counter/EXT ordery).
-# wave_isolation_study=True: report/stats filtr WAVE slice (stejne jako grid combo 2).
+# wave_isolation_study=True: live MT5 = WAVE + counter + EXT counter (engine parita);
+# bez PP/BOS entry/EXT primary (viz runtime/live_wave_isolation.py).
 
 LIVE_BOT_CONFIG = BotConfig(
     # ============== MARKET SETTING ==============
@@ -301,7 +303,7 @@ LIVE_BOT_CONFIG = BotConfig(
     wave_size_sl_ladder_step_pct=0.16,
     wave_size_sl_ladder_band_size_pct=0.50,
 
-    # ============== EXT (combo 2 — wave_isolation_study; engine bezi, obchody WAVE+counter kontext) ==============
+    # ============== EXT (combo 2 — detekce/kontext; MT5 ordery jen WAVE) ==============
     ext_enabled=True,
     ext_secondary_enabled=False,
     ext_wave_min_pct=0.76,

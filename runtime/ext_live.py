@@ -234,6 +234,7 @@ class ExtLiveRuntime:
 
             ok = place_ext_secondary_order(
                 sec_signal, cfg, entry_mode=cfg.entry_mode, ext_wave_time=wt,
+                bar_close=float(bar["close"]),
             )
             if ok:
                 sent_signals.add(sig_key)

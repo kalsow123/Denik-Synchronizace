@@ -107,6 +107,7 @@ class WfWavePrepResult:
     eval_result: dict | None = None
     ext_skipped: bool = False
     resumed_count: int = 0
+    activation_bar_idx: int | None = None
 
 
 def prepare_waves_after_wf_eval(

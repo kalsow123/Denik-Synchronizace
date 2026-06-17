@@ -411,12 +411,30 @@ def _check_min_dist(value_close: float, value_far: float, min_stop_dist: float,
     return True
 
 
+def decision_prices_from_bar_close(
+    bar_close: float | None,
+    tick,
+) -> tuple[float, float]:
+    """
+    Synthetic ask/bid z close posledniho uzavreneho baru (parita backtest engine).
+
+    Rozhodnuti LIMIT vs fallback / abort bezi na techto cenach; exekuce MARKET
+    porad pouziva realny tick.
+    """
+    if bar_close is None:
+        return float(tick.ask), float(tick.bid)
+    half = max((float(tick.ask) - float(tick.bid)) / 2.0, 0.0)
+    bc = float(bar_close)
+    return bc + half, bc - half
+
+
 def send_order(
     signal: dict,
     cfg: BotConfig,
     entry_mode: EntryMode = None,
     placed_meta: dict | None = None,
     *,
+    bar_close: float | None = None,
     trend_state_at_fill: TrendState | None = None,
     bypass_trend_filter: bool = False,
     is_two_sided_mirror: bool = False,
@@ -430,6 +448,22 @@ def send_order(
     if entry_mode is None:
         entry_mode = cfg.entry_mode
     em_value = entry_mode.value if isinstance(entry_mode, EntryMode) else str(entry_mode)
+
+    from runtime.live_wave_isolation import guard_live_send_order
+
+    if guard_live_send_order(
+        cfg,
+        signal,
+        is_two_sided_mirror=is_two_sided_mirror,
+        bypass_trend_filter=bypass_trend_filter,
+    ):
+        return True
+
+    if (
+        not is_two_sided_mirror
+        and not bool(getattr(cfg, "wave_position_enabled", True))
+    ):
+        return True
 
     ep = float(signal["fib50"])
     sl = float(signal["sl"])
@@ -470,18 +504,20 @@ def send_order(
     is_buy = (direction == 1)
     side = "BUY" if is_buy else "SELL"
     market_price = tick.ask if is_buy else tick.bid
+    decision_ask, decision_bid = decision_prices_from_bar_close(bar_close, tick)
+    decision_price = decision_ask if is_buy else decision_bid
 
     # ── Pojistka: cena uz prosla za SL ──
-    if is_buy and tick.ask <= sl:
+    if is_buy and decision_ask <= sl:
         log.info(
             f"Preskocena vlna {wave_time} - BUY: cena uz za SL | "
-            f"Ask={tick.ask:.5f} SL={sl:.5f}"
+            f"Ask={decision_ask:.5f} SL={sl:.5f}"
         )
         return False
-    if (not is_buy) and tick.bid >= sl:
+    if (not is_buy) and decision_bid >= sl:
         log.info(
             f"Preskocena vlna {wave_time} - SELL: cena uz za SL | "
-            f"Bid={tick.bid:.5f} SL={sl:.5f}"
+            f"Bid={decision_bid:.5f} SL={sl:.5f}"
         )
         return False
 
@@ -491,16 +527,16 @@ def send_order(
     past_abort = False
     if fa_raw is not None:
         fib_abort = float(fa_raw)
-        if is_buy and tick.ask <= fib_abort:
+        if is_buy and decision_ask <= fib_abort:
             past_abort = True
-        elif (not is_buy) and tick.bid >= fib_abort:
+        elif (not is_buy) and decision_bid >= fib_abort:
             past_abort = True
 
     if past_abort:
         if not abort_fib_shift_sl_mode(cfg):
             log.info(
                 f"Preskocena vlna {wave_time} - {side}: cena na/za abort Fib | "
-                f"{('Ask' if is_buy else 'Bid')}={(tick.ask if is_buy else tick.bid):.5f} "
+                f"{('Ask' if is_buy else 'Bid')}={decision_price:.5f} "
                 f"Abort={fib_abort:.5f} SL={sl:.5f}"
             )
             return False
@@ -514,7 +550,7 @@ def send_order(
     # ── Rozhodnuti: LIMIT (primary) vs FALLBACK ──
     # BUY:  LIMIT pokud Ask > ep (cena nad entry, ceka na pokles)
     # SELL: LIMIT pokud Bid < ep (cena pod entry, ceka na rust)
-    can_limit = (tick.ask > ep) if is_buy else (tick.bid < ep)
+    can_limit = (decision_ask > ep) if is_buy else (decision_bid < ep)
 
     if can_limit:
         return _place_limit_primary(
@@ -529,7 +565,7 @@ def send_order(
     if em_value == "no_fallback":
         log.info(
             f"Preskocena vlna {wave_time} - {side} fallback vypnut | "
-            f"EP={ep:.5f} {('Ask' if is_buy else 'Bid')}={market_price:.5f}"
+            f"EP={ep:.5f} {('Ask' if is_buy else 'Bid')}={decision_price:.5f}"
         )
         return False
 
@@ -831,18 +867,33 @@ def _place_stop_fallback(cfg: BotConfig, *, side: str, is_buy: bool, ep: float,
 
 
 # ─── STARTUP: PENDING ONLY ───────────────────────────────────
-def send_startup_pending_only(signal: dict, cfg: BotConfig) -> bool:
+def send_startup_pending_only(
+    signal: dict,
+    cfg: BotConfig,
+    *,
+    pine_recovery: bool = False,
+    bar_close: float | None = None,
+) -> bool:
     """
     Posle pouze pending LIMIT order - bez market / stop fallbacku.
     Pouziva se ve startup recovery, abychom nezpoznili obnoveni starych
     setupu otevrenim nahodneho marketu pri restartu bota.
 
-    Trend-follow:
+    pine_recovery=True: simulace (pine) potvrdila, ze LIMIT jeste nebyl fillnut
+    na uzavrenych barech — LIMIT posleme i kdyz aktualni tick je za entry
+    (vikendovy gap / spread). Rozhodnuti SL/abort na bar_close pokud je k dispozici.
+
+    Trend-follow (bez pine_recovery):
       BUY  LIMIT pokud Ask > ep (cena nad entry, ceka se pokles)
       SELL LIMIT pokud Bid < ep (cena pod entry, ceka se rust)
       Jinak setup preskocime - cena uz je za entry, recovery NEDOPLNUJE.
     """
     ep = float(signal["fib50"])
+    from runtime.live_wave_isolation import guard_live_send_order
+
+    if guard_live_send_order(cfg, signal):
+        return True
+
     sl = float(signal["sl"])
     direction = int(signal["dir"])
     wave_time = signal["wave_time"]
@@ -866,18 +917,19 @@ def send_startup_pending_only(signal: dict, cfg: BotConfig) -> bool:
 
     is_buy = (direction == 1)
     side = "BUY" if is_buy else "SELL"
+    decision_ask, decision_bid = decision_prices_from_bar_close(bar_close, tick)
 
-    # SL pojistka
-    if is_buy and tick.ask <= sl:
+    # SL pojistka (parita send_order — rozhodnuti na close baru pokud znamy)
+    if is_buy and decision_ask <= sl:
         log.info(
             f"STARTUP SKIP {wave_time} | BUY cena uz za SL | "
-            f"Ask={tick.ask:.5f} SL={sl:.5f}"
+            f"Ask={decision_ask:.5f} SL={sl:.5f}"
         )
         return False
-    if (not is_buy) and tick.bid >= sl:
+    if (not is_buy) and decision_bid >= sl:
         log.info(
             f"STARTUP SKIP {wave_time} | SELL cena uz za SL | "
-            f"Bid={tick.bid:.5f} SL={sl:.5f}"
+            f"Bid={decision_bid:.5f} SL={sl:.5f}"
         )
         return False
 
@@ -885,27 +937,28 @@ def send_startup_pending_only(signal: dict, cfg: BotConfig) -> bool:
     past_abort = False
     if fa_raw is not None:
         fib_abort = float(fa_raw)
-        if is_buy and tick.ask <= fib_abort:
+        if is_buy and decision_ask <= fib_abort:
             past_abort = True
-        elif (not is_buy) and tick.bid >= fib_abort:
+        elif (not is_buy) and decision_bid >= fib_abort:
             past_abort = True
 
     if past_abort and not abort_fib_shift_sl_mode(cfg):
         log.info(
             f"STARTUP SKIP {wave_time} | {side} na/za abort Fib | "
-            f"{('Ask' if is_buy else 'Bid')}={(tick.ask if is_buy else tick.bid):.5f} "
+            f"{('Ask' if is_buy else 'Bid')}={(decision_ask if is_buy else decision_bid):.5f} "
             f"Abort={fib_abort:.5f}"
         )
         return False
 
-    # Cena uz prosla entry -> recovery pro bezpecnost preskoci
-    can_limit = (tick.ask > ep) if is_buy else (tick.bid < ep)
-    if not can_limit:
-        log.info(
-            f"STARTUP SKIP {wave_time} | {side} cena uz za entry | "
-            f"EP={ep:.5f} {('Ask' if is_buy else 'Bid')}={(tick.ask if is_buy else tick.bid):.5f}"
-        )
-        return False
+    if not pine_recovery:
+        # Cena uz prosla entry -> recovery pro bezpecnost preskoci
+        can_limit = (tick.ask > ep) if is_buy else (tick.bid < ep)
+        if not can_limit:
+            log.info(
+                f"STARTUP SKIP {wave_time} | {side} cena uz za entry | "
+                f"EP={ep:.5f} {('Ask' if is_buy else 'Bid')}={(tick.ask if is_buy else tick.bid):.5f}"
+            )
+            return False
 
     lot = calc_lot(ep, sl, cfg)
     # TP resi resolve_effective_tp — None znamena bez TP (broker dostane 0.0).
@@ -2079,6 +2132,11 @@ def place_counter_position_pending(cfg: BotConfig, *, wave_time: str,
     tp: RRR/BOS_EXIT safety TP (cfg.rrr); None = bez broker TP (WAVE_TARGET_N
         exit na TP-vlne N pres close_wave_counter_positions).
     """
+    from runtime.live_wave_isolation import skip_live_non_wave_entry
+
+    if skip_live_non_wave_entry(cfg, "COUNTER", wave_time=str(wave_time)):
+        return False
+
     if block_duplicate_counter_order(cfg, wave_time):
         return True
 
@@ -2127,6 +2185,11 @@ def place_counter_position_market(
     G varianta wave counter: MARKET vstup ve stejnem momentu jako TP_EXTENSION_HIT.
     Comment CNTR_ + wave_time (synteticky klic pred birth W(N)).
     """
+    from runtime.live_wave_isolation import skip_live_non_wave_entry
+
+    if skip_live_non_wave_entry(cfg, "COUNTER", wave_time=str(wave_time)):
+        return False
+
     if block_duplicate_counter_order(cfg, wave_time):
         return True
 
@@ -2260,6 +2323,13 @@ def place_bos_reentry_market(cfg: BotConfig, *, new_trend_dir: int,
 
     new_trend_dir = +1 (bull) → BUY MARKET; -1 (bear) → SELL MARKET.
     """
+    from runtime.live_wave_isolation import skip_live_non_wave_entry
+
+    if skip_live_non_wave_entry(
+        cfg, "BOS", broken_wave_time=str(broken_wave_time or ""),
+    ):
+        return False
+
     if block_duplicate_bos_reentry(cfg, broken_wave_time):
         return True
 
@@ -2346,6 +2416,11 @@ def place_pp_pending(cfg: BotConfig, *, wave_time: str, trend_dir: int,
     rozpoznat (PP pendingy maji vlastni lifecycle — rusi se jen pri novem PP
     nebo pri BOS flipu).
     """
+    from runtime.live_wave_isolation import skip_live_non_wave_entry
+
+    if skip_live_non_wave_entry(cfg, "PP", wave_time=str(wave_time)):
+        return False
+
     if block_duplicate_pp_order(cfg, wave_time):
         return True
 
@@ -2388,6 +2463,11 @@ def place_pp_market_fallback(cfg: BotConfig, *, wave_time: str, trend_dir: int,
     uzivatel pozici stejne otevrit za aktualni trzni cenu (vetsinou velmi
     blizko `entry_price`, ale s urcitym slippage).
     """
+    from runtime.live_wave_isolation import skip_live_non_wave_entry
+
+    if skip_live_non_wave_entry(cfg, "PP", wave_time=str(wave_time)):
+        return False
+
     if block_duplicate_pp_order(cfg, wave_time):
         return True
 
@@ -2630,11 +2710,17 @@ def place_ext_secondary_order(
     *,
     entry_mode: EntryMode | None = None,
     ext_wave_time: str,
+    bar_close: float | None = None,
 ) -> bool:
     """
     Sekundarni EXT LIMIT / fallback (parita s backtest `_process_ext_secondary_for_wave`).
     Comment: E23_{ext_wave_time}.
     """
+    from runtime.live_wave_isolation import skip_live_non_wave_entry
+
+    if skip_live_non_wave_entry(cfg, "EXT_SECONDARY", wave_time=str(ext_wave_time)):
+        return False
+
     if block_duplicate_ext_secondary(cfg, ext_wave_time):
         return True
 
@@ -2657,14 +2743,15 @@ def place_ext_secondary_order(
     min_stop_dist = (info.trade_stops_level or 0) * (info.point or 0)
     is_buy = direction == 1
     side = "BUY" if is_buy else "SELL"
+    decision_ask, decision_bid = decision_prices_from_bar_close(bar_close, tick)
 
-    if is_buy and tick.ask <= sl:
+    if is_buy and decision_ask <= sl:
         return False
-    if (not is_buy) and tick.bid >= sl:
+    if (not is_buy) and decision_bid >= sl:
         return False
 
     comment = f"{EXT_SECONDARY_COMMENT_PREFIX}{wave_time}"[:31]
-    can_limit = (tick.ask > ep) if is_buy else (tick.bid < ep)
+    can_limit = (decision_ask > ep) if is_buy else (decision_bid < ep)
 
     if can_limit:
         lot = calc_lot(ep, sl, cfg)
@@ -2672,10 +2759,13 @@ def place_ext_secondary_order(
             return False
         tp = compute_ext_secondary_take_profit(cfg, ep, sl, is_buy=is_buy)
         label = f"{side}_LIMIT_EXT0236"
+        market_ref = tick.ask if is_buy else tick.bid
         if not _check_min_dist(
-            tick.ask if is_buy else tick.bid, ep, min_stop_dist, label, wave_time,
+            market_ref, ep, min_stop_dist, label, wave_time,
             near="EP", far=("Ask" if is_buy else "Bid"),
         ):
+            return False
+        if not _check_min_dist(ep, sl, min_stop_dist, label, wave_time, near="SL", far="EP"):
             return False
         order_type = mt5.ORDER_TYPE_BUY_LIMIT if is_buy else mt5.ORDER_TYPE_SELL_LIMIT
         request = _build_pending_request(
@@ -2709,7 +2799,7 @@ def place_ext_secondary_order(
 
     if em_value == "stop_fallback":
         label = f"{side}_STOP_EXT0236"
-        market_ref = tick.ask if is_buy else tick.bid
+        market_ref = decision_ask if is_buy else decision_bid
         if is_buy and ep <= market_ref:
             return False
         if (not is_buy) and ep >= market_ref:
@@ -2735,6 +2825,13 @@ def place_ext_counter_market(
     """
     EXT counter MARKET (cas nebo BOS). Comment ECT_ / ECB_ + ext_wave_time.
     """
+    from runtime.live_wave_isolation import skip_live_non_wave_entry
+
+    if skip_live_non_wave_entry(
+        cfg, "EXT_COUNTER", wave_time=str(ext_wave_time), source=str(source),
+    ):
+        return False
+
     if source == "time":
         if block_duplicate_ext_counter_time(cfg, ext_wave_time):
             return True

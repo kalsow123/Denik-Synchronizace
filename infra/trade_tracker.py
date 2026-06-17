@@ -203,6 +203,7 @@ def update_trade_tracker(
     state: TradeTrackerState,
     *,
     adx14_runtime=None,
+    live_wave_stats=None,
 ) -> None:
     """
     Vola se kazdy cyklus live_loopu. Detekuje zmeny a loguje strukturovane eventy.
@@ -305,8 +306,13 @@ def update_trade_tracker(
     for ticket, snap in list(state.known_positions.items()):
         if ticket not in current_positions:
             close_data = _fetch_close_data(ticket, snap)
-            wave_id = _wave_id_from_comment(snap.get("comment", ""))
+            comment = str(snap.get("comment", "") or "")
+            wave_id = _wave_id_from_comment(comment)
             side = _position_side(snap["type"])
+
+            from runtime.live_wave_stats import position_kind_from_mt5_comment
+
+            position_kind = position_kind_from_mt5_comment(comment)
 
             # duration_sec: rozdil mezi otevrenim a zavrenim pozice
             duration_sec: Optional[int] = None
@@ -334,7 +340,15 @@ def update_trade_tracker(
                 close_reason=close_data["close_reason"],
                 duration_sec=duration_sec,
                 wave_id=wave_id,
+                position_kind=position_kind,
+                comment=comment,
             )
+
+            if live_wave_stats is not None:
+                live_wave_stats.on_position_closed(
+                    comment=comment,
+                    pnl_usd=float(close_data["pnl_usd"]),
+                )
 
             if adx14_runtime is not None and getattr(adx14_runtime, "pnl_tracker", None):
                 close_iso = close_data.get("close_time") or datetime.now(timezone.utc).isoformat()

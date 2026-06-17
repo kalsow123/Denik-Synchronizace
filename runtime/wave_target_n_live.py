@@ -191,3 +191,8 @@ def sync_wave_target_n_live_state(
                             break
 
     return result
+
+
+def reset_wave_target_n_runtime_state() -> tuple[Set[str], None]:
+    """Vyprázdní in-memory TP/G stav — další sync z MT5 OHLC ho obnoví (restart/outage)."""
+    return set(), None

@@ -134,3 +134,41 @@ def test_counter_placed_from_mt5_key():
     assert sync.forming_tp_watch is not None
     assert sync.forming_tp_watch.counter_placed is True
     assert sync.forming_tp_watch.counter_wave_time_key == g_key
+
+
+def test_extension_catch_up_after_outage():
+    """Po výpadku sync detekuje extension hit na minulém baru (replay 2..last-1)."""
+    cfg = _cfg_g(wave_min_pct=0.20, wave_extension_pct=0.10)
+    df = pd.DataFrame(
+        {
+            "time": pd.date_range("2026-03-01", periods=6, freq="30min"),
+            "open": [1.1000, 1.1000, 1.1100, 1.1120, 1.1130, 1.1140],
+            "high": [1.1000, 1.1000, 1.1250, 1.1140, 1.1150, 1.1160],
+            "low": [1.1000, 1.1000, 1.1090, 1.1110, 1.1120, 1.1130],
+            "close": [1.1000, 1.1000, 1.1220, 1.1130, 1.1140, 1.1150],
+        }
+    )
+    wt_w3 = "202603011000"
+    waves = [
+        {
+            "wave_time": wt_w3,
+            "dir": 1,
+            "box_top": 1.1100,
+            "box_bottom": 1.1000,
+            "move_pct": 0.68,
+            "draw_right": 1,
+        },
+    ]
+    seq_info = {
+        wt_w3: WaveSequenceInfo(index_in_trend=3, prev_same_dir_in_trend_wave_time="w2"),
+    }
+    sync = sync_wave_target_n_live_state(
+        cfg, df, waves, seq_info,
+        birth_by_time={wt_w3: 1},
+        last_bar_idx=5,
+        active_counter_wave_times=set(),
+    )
+    assert sync.forming_tp_watch is not None
+    assert sync.catch_up_extension is True
+    assert sync.catch_up_bar == 2
+    assert sync.forming_tp_watch.extension_hit_done is True

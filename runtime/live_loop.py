@@ -30,8 +30,6 @@ from infra.orders import (
     close_all_positions,
     close_flip_follower_positions_on_bos,
     close_positions_by_direction,
-    close_positions_on_extension_tp_hit,
-    close_positions_on_tp_wave_n,
     enforce_counter_positions_min_sl,
     get_pp_pending_wave_times,
     get_active_counter_wave_times,
@@ -87,13 +85,8 @@ from strategy.wave_sequence import (
 from strategy.wave_target_n_mode import is_wave_target_n_family, is_wave_target_n_g
 from strategy.wave_target_n_early import (
     FormingTpWatch,
-    extension_tp_hit_on_bar,
     g_counter_wave_time,
-    start_forming_tp_watch,
-    tp_wave_early_fallback_birth,
     wave_counter_entry_allowed,
-    wave_target_n_early_g_enabled,
-    wave_target_n_extension_exit_enabled,
 )
 from strategy.two_sided import (
     TwoSidedTracker,
@@ -114,7 +107,6 @@ from strategy.trend_bos import resolve_effective_tp
 from runtime.adx14_live import Adx14LiveRuntime
 from runtime.ext_live import ExtLiveRuntime
 from runtime.wf_live import WfLiveRuntime
-from runtime.wave_target_n_live import sync_wave_target_n_live_state
 
 # ───── LIVE BOT ──────────────────────────
 # Nastavení jak bot funguje. Co dělá během errorů, jak je řeší.
@@ -256,6 +248,7 @@ def _attempt_live_bos_retro_entry(
     ext_sl_anchor: Optional[dict],
     seq_info: dict,
     waves: list,
+    bar_close: float | None = None,
 ) -> tuple[bool, Optional[dict]]:
     """
     BOS retro aktivace na close-based flip baru — parita engine
@@ -302,7 +295,19 @@ def _attempt_live_bos_retro_entry(
         return False, ext_sl_anchor
 
     if not bool(getattr(cfg, "wave_position_enabled", True)):
+        if _try_live_counter_only_on_wave(
+            cfg=cfg,
+            wave=wave,
+            seq_info=seq_info,
+            all_waves=waves,
+            entries_allowed=entries_allowed,
+            sent_signals=sent_signals,
+            sig_key=sig_key,
+        ):
+            retro_bos_attempted.add(wt)
+            return False, ext_sl_anchor
         sent_signals.add(sig_key)
+        retro_bos_attempted.add(wt)
         return False, ext_sl_anchor
 
     if not entries_allowed:
@@ -342,6 +347,7 @@ def _attempt_live_bos_retro_entry(
         placed_meta=placed_meta,
         trend_state_at_fill=fill_trend_state,
         bypass_trend_filter=True,
+        bar_close=bar_close,
     ):
         _maybe_place_live_counter_from_tp(
             cfg=cfg,
@@ -388,7 +394,8 @@ def _maybe_fire_pp_break_event(*, cfg: BotConfig, df, waves,
                                 current_trend: str,
                                 processed_pp_wave_times: Set[str],
                                 wave_birth_by_time: dict[str, int],
-                                entries_allowed: bool = True) -> None:
+                                entries_allowed: bool = True,
+                                bar_idx: int | None = None) -> None:
     """
     Detekuje PP break na poslednim close-baru:
       - V UP trendu hleda nejnovejsi UP vlnu, jejiz box_top je prelomeny posledni
@@ -412,9 +419,10 @@ def _maybe_fire_pp_break_event(*, cfg: BotConfig, df, waves,
             trend=str(current_trend),
         )
         return
-    bar_close = float(df["close"].iloc[-1])
+    _bar_ix = int(bar_idx) if bar_idx is not None else len(df) - 1
+    bar_close = float(df["close"].iloc[_bar_ix])
     trend_dir = 1 if current_trend == "bull" else -1
-    last_bar_idx = len(df) - 1
+    last_bar_idx = _bar_ix
 
     candidate = find_pp_candidate_wave(
         waves,
@@ -767,6 +775,53 @@ def _place_live_counter_from_g_extension(
         )
 
 
+def _try_live_counter_only_on_wave(
+    *,
+    cfg: BotConfig,
+    wave: dict,
+    seq_info: Dict[str, Any],
+    all_waves,
+    entries_allowed: bool,
+    sent_signals: Set[str],
+    sig_key: str,
+) -> bool:
+    """
+    Parita engine: wave_position_enabled=False — bez primarniho WAVE vstupu,
+    counter jen na TP-vlnach (pokud wave_counter_two_sided_orders_enabled).
+    """
+    if bool(getattr(cfg, "wave_position_enabled", True)):
+        return False
+    sent_signals.add(sig_key)
+    if not wave_counter_two_sided_orders_enabled(cfg):
+        return True
+    if not entries_allowed:
+        _log_adx14_entry_blocked(
+            cfg,
+            entry_type="COUNTER_ONLY",
+            wave_id=str(wave.get("wave_time", "")),
+        )
+        return True
+    ep = float(wave["fib50"])
+    sl = float(wave["sl"])
+    is_buy = int(wave["dir"]) == 1
+    tp = resolve_effective_tp(cfg, wave, ep, sl, is_buy=is_buy)
+    _maybe_place_live_counter_from_tp(
+        cfg=cfg,
+        wave=wave,
+        seq_info=seq_info,
+        tp_price=tp,
+        all_waves=all_waves,
+        entries_allowed=entries_allowed,
+    )
+    log_event(
+        cfg,
+        "info",
+        "WAVE_COUNTER_ONLY_PROCESSED",
+        wave_id=str(wave.get("wave_time", "")),
+    )
+    return True
+
+
 def _maybe_place_live_counter_from_tp(
     *,
     cfg: BotConfig,
@@ -839,19 +894,13 @@ def _maybe_place_live_counter_from_tp(
 
 
 def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
-    from config.position_modes import resolve_grid_engine_config
+    from runtime.live_wave_isolation import (
+        log_live_execution_mode,
+        resolve_live_execution_config,
+    )
 
-    cfg = resolve_grid_engine_config(cfg)
-    if bool(getattr(cfg, "wave_positions_only", False)):
-        log_event(
-            cfg,
-            "info",
-            "WAVE_POSITIONS_ONLY",
-            message=(
-                "Live: WAVE report slice + engine counter/EXT kontext "
-                "(wave_isolation_study filtruje report jako grid combo 2)"
-            ),
-        )
+    cfg = resolve_live_execution_config(cfg)
+    log_live_execution_mode(cfg)
     # Pri startu bota odpalime STATUS hned (timer nastaven do minulosti
     # tak, aby prvni kontrola v loopu hned vystrelila log).
     def _status_init_last(hours: float) -> datetime:
@@ -905,6 +954,10 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
     # Po restartu / kazdem cyklu sync z historickych vln + MT5 CNTR_ (parita backtest).
     processed_tp_wave_times: Set[str] = set()
     forming_tp_watch: Optional[FormingTpWatch] = None
+    from runtime.live_wave_stats import LiveWaveStatsTracker
+
+    live_wave_stats = LiveWaveStatsTracker()
+    last_live_wave_summary_closes = 0
 
     # PP wave_times, kterym uz PP order byl polozen (max 1x per vlna).
     # Po restartu se inicializuje z MT5 (comment prefix PP_).
@@ -1111,13 +1164,19 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                     # Po wake-up spustime startup recovery, abychom obnovili
                     # vlny ktere vznikly behem spanku
                     try:
-                        from runtime.startup import (
-                            block_historical_waves,
-                            restore_all_pending_orders,
+                        from runtime.startup import run_full_startup_recovery
+
+                        sent_signals = run_full_startup_recovery(
+                            cfg,
+                            sent_signals,
+                            failed_signals=failed_signals,
+                            recovery_reason="session_wake_up",
                         )
-                        recovered = restore_all_pending_orders(cfg)
-                        sent_signals |= recovered
-                        sent_signals = block_historical_waves(cfg, sent_signals)
+                        from runtime.wave_target_n_live import reset_wave_target_n_runtime_state
+
+                        processed_tp_wave_times, forming_tp_watch = (
+                            reset_wave_target_n_runtime_state()
+                        )
                         ext_runtime.sync_from_mt5(cfg)
                         wf_runtime.reset()
                         log.info(
@@ -1128,7 +1187,19 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
 
             # ───── HLAVNI LOOP ─────────────────────────────
             # Trade tracker - detekce ORDER_FILLED, POSITION_OPENED/CLOSED, MT5 connection
-            update_trade_tracker(cfg, tracker_state, adx14_runtime=adx14_runtime)
+            update_trade_tracker(
+                cfg,
+                tracker_state,
+                adx14_runtime=adx14_runtime,
+                live_wave_stats=live_wave_stats,
+            )
+            from runtime.live_wave_stats import maybe_emit_live_wave_summary
+
+            last_live_wave_summary_closes = maybe_emit_live_wave_summary(
+                cfg,
+                live_wave_stats,
+                last_emit_wave_closes=last_live_wave_summary_closes,
+            )
             enforce_counter_positions_min_sl(
                 cfg, min_sl_pct=wave_counter_min_sl_pct(cfg)
             )
@@ -1189,8 +1260,27 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 _emit_live_periodic_logs()
                 continue
 
-            last_processed_closed_bar_time = closed_bar_ts
             df = _df_closed_bars_only(df)
+            from runtime.missed_bar_replay import new_closed_bar_indices
+
+            new_bar_indices = new_closed_bar_indices(
+                df, last_processed_closed_bar_time,
+            )
+            if not new_bar_indices:
+                _emit_live_periodic_logs()
+                continue
+
+            if len(new_bar_indices) > 1:
+                log_event(
+                    cfg,
+                    "info",
+                    "MISSED_BARS_CATCH_UP",
+                    missed_bars=int(len(new_bar_indices) - 1),
+                    first_bar_idx=int(new_bar_indices[0]),
+                    last_bar_idx=int(new_bar_indices[-1]),
+                )
+
+            last_processed_closed_bar_time = closed_bar_ts
 
             waves = detect_waves(df, cfg)
             if not waves:
@@ -1266,8 +1356,9 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 df, cfg, seq_info=seq_info, protected_waves=protected_waves, waves=waves,
             )
             ext_runtime.run_ext1_rrr_better_exit(cfg, df)
-            last_bar_idx = len(df) - 1
-            last_bar_time = pd.Timestamp(df["time"].iloc[-1]).to_pydatetime()
+            last_bar_idx = new_bar_indices[-1]
+            last_bar_time = pd.Timestamp(df["time"].iloc[last_bar_idx]).to_pydatetime()
+            bar_entry_close = float(df.iloc[last_bar_idx]["close"])
             ext1_per_bar = ext_runtime._ext1_protection_per_bar
 
             if two_sided_enabled(cfg):
@@ -1303,10 +1394,10 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
             )
             if need_bar_trend:
                 bar_trend_states = compute_trend_states_per_bar(df, waves, cfg)
-                current_trend = bar_trend_states[-1].direction if bar_trend_states else "neutral"
+                current_trend = bar_trend_states[last_bar_idx].direction if bar_trend_states else "neutral"
             fill_trend_state = (
-                bar_trend_states[-1]
-                if bar_trend_states
+                bar_trend_states[last_bar_idx]
+                if bar_trend_states and last_bar_idx < len(bar_trend_states)
                 else None
             )
             if cfg.trend_filter_enabled and fill_trend_state is not None:
@@ -1315,10 +1406,81 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 except Exception as e:
                     log.error(f"TREND_FILL_GUARD cancel selhal: {e}", exc_info=True)
 
+            from config.enums import PendingCancelMode as _PCM
+            pcm_raw = getattr(cfg, "pending_cancel_mode", _PCM.NUMBER)
+            try:
+                pcm = _PCM(pcm_raw) if isinstance(pcm_raw, str) else pcm_raw
+            except ValueError:
+                pcm = _PCM.NUMBER
+
+            wf_activation_queue = wf_runtime.pop_activation_results()
             if wf_prep.wf_wave is not None:
+                wf_activation_queue.append(wf_prep)
+
+            symbol_info = mt5.symbol_info(cfg.symbol)
+            signal_digits = int(getattr(symbol_info, "digits", 4)) if symbol_info else 4
+            new_signal_sent = False
+
+            if len(new_bar_indices) > 1:
+                from runtime.missed_bar_replay import (
+                    MissedBarReplayState,
+                    replay_missed_closed_bar,
+                )
+
+                _replay_state = MissedBarReplayState(
+                    last_known_trend_dir=last_known_trend_dir,
+                    prev_cycle_last_bar_time=prev_cycle_last_bar_time,
+                    processed_tp_wave_times=processed_tp_wave_times,
+                    forming_tp_watch=forming_tp_watch,
+                    ext_sl_anchor=ext_sl_anchor,
+                    retro_bos_attempted=retro_bos_attempted,
+                )
+                for _missed_idx in new_bar_indices[:-1]:
+                    _replay_state = replay_missed_closed_bar(
+                        cfg=cfg,
+                        df=df,
+                        waves=waves,
+                        bar_idx=_missed_idx,
+                        state=_replay_state,
+                        bar_trend_states=bar_trend_states,
+                        seq_info=seq_info,
+                        protected_waves=protected_waves,
+                        bos_flip_map=_bos_flip_map_live,
+                        bos_wave_times=bos_wave_times,
+                        trend_states_per_wave=trend_states_per_wave,
+                        ext1_per_bar=ext1_per_bar,
+                        ext_runtime=ext_runtime,
+                        wf_activations=wf_activation_queue,
+                        sent_signals=sent_signals,
+                        failed_signals=failed_signals,
+                        signal_digits=signal_digits,
+                        entries_allowed=entries_allowed,
+                        wave_birth_by_time=_wave_birth_by_time,
+                        active_counter_wave_times=get_active_counter_wave_times(cfg),
+                        pcm=pcm,
+                        place_live_bos_reentry=_place_live_bos_reentry,
+                        place_live_counter_from_g_extension=_place_live_counter_from_g_extension,
+                        g_extension_hit_closed_positions=_g_extension_hit_closed_positions,
+                        place_live_counter_position=_place_live_counter_position,
+                        log_event_fn=log_event,
+                    )
+                last_known_trend_dir = _replay_state.last_known_trend_dir
+                prev_cycle_last_bar_time = _replay_state.prev_cycle_last_bar_time
+                processed_tp_wave_times = _replay_state.processed_tp_wave_times
+                forming_tp_watch = _replay_state.forming_tp_watch
+                ext_sl_anchor = _replay_state.ext_sl_anchor
+
+            for _wf_act in wf_activation_queue:
+                if _wf_act.wf_wave is None:
+                    continue
+                if (
+                    _wf_act.activation_bar_idx is not None
+                    and int(_wf_act.activation_bar_idx) != int(last_bar_idx)
+                ):
+                    continue
                 try:
-                    _wf_wave = wf_prep.wf_wave
-                    _wf_result = wf_prep.eval_result or {}
+                    _wf_wave = _wf_act.wf_wave
+                    _wf_result = _wf_act.eval_result or {}
                     _wf_wt_str = str(_wf_wave.get("wave_time", ""))
                     _wf_sig_key = get_signal_key(_wf_wave, digits=signal_digits)
                     if _wf_sig_key not in sent_signals:
@@ -1336,7 +1498,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                             last_wave_high=float(_wf_origin.get("box_top", 0.0)),
                             last_wave_low=float(_wf_origin.get("box_bottom", 0.0)),
                             fakeout_pivot=float(_wf_result.get("fakeout_pivot", 0.0)),
-                            activation_close=float(df.iloc[-1]["close"]),
+                            activation_close=float(bar_entry_close),
                             window_size_bars=int(_wf_result.get("window_size", 0)),
                         )
                         if send_order(
@@ -1344,16 +1506,17 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                             cfg,
                             entry_mode=cfg.entry_mode,
                             trend_state_at_fill=fill_trend_state,
+                            bar_close=bar_entry_close,
                         ):
                             sent_signals.add(_wf_sig_key)
                             new_signal_sent = True
-                    if wf_prep.resumed_count:
+                    if _wf_act.resumed_count:
                         log_event(
                             cfg,
                             "info",
                             "WF_CLASSIC_WAVES_RESUMED",
                             wf_wave_id=_wf_wt_str,
-                            resumed=wf_prep.resumed_count,
+                            resumed=_wf_act.resumed_count,
                         )
                 except Exception as _wf_exc:
                     log.error("WF live aktivace selhala: %s", _wf_exc, exc_info=True)
@@ -1363,12 +1526,6 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
             #   cancel_pendings: zrusi pendingy ve smeru staré trendovky
             #                    - "trend"  → vzdy
             #                    - "number" → nikdy (jen časová expirace)
-            from config.enums import PendingCancelMode as _PCM
-            pcm_raw = getattr(cfg, "pending_cancel_mode", _PCM.NUMBER)
-            try:
-                pcm = _PCM(pcm_raw) if isinstance(pcm_raw, str) else pcm_raw
-            except ValueError:
-                pcm = _PCM.NUMBER
             bos_active = tp_mode_uses_bos_per_bar_exit(cfg)
             do_close_pos = bos_active
             do_cancel_pend = pcm == _PCM.TREND
@@ -1401,7 +1558,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 if _wt_bos:
                     _bos_protect_wave_time = str(_wt_bos)
 
-            _last_bar = df.iloc[-1] if not df.empty else None
+            _last_bar = df.iloc[last_bar_idx] if not df.empty else None
             _bar_high = float(_last_bar["high"]) if _last_bar is not None else None
             _bar_low = float(_last_bar["low"]) if _last_bar is not None else None
 
@@ -1561,283 +1718,46 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                     )
 
             # Wave sequence — uz spocteno vyse (po detect_waves).
-            # Rodina wave_target_n / wave_target_n_g: pre-compute TP-wave ceny do `waves`.
-            # G preset: tp_mode=wave_target_n_g (viz strategy/wave_target_n_mode.py).
-            # `send_order` -> `resolve_effective_tp` pak cte `wave["wave_target_tp_price"]`
-            # — kdyz neni nastaveno (K<N nebo non-TP-wave index), vrati None
-            # (= broker dostane TP=0.0, bez TP).
+            # WAVE_TARGET_N / G: jednotny bar cyklus (parita backtest + missed-bar replay).
             if is_wave_target_n_family(cfg):
-                target_n = int(getattr(cfg, "tp_target_wave_index", 0) or 0)
-                _tp_bar = df.iloc[-1] if not df.empty else None
-                bar_high = float(_tp_bar["high"]) if _tp_bar is not None else 0.0
-                bar_low = float(_tp_bar["low"]) if _tp_bar is not None else 0.0
-                bar_close = float(_tp_bar["close"]) if _tp_bar is not None else 0.0
-                bar_open = float(_tp_bar["open"]) if _tp_bar is not None else 0.0
+                try:
+                    from runtime.wave_target_n_bar import run_wave_target_n_bar_cycle
 
-                _tp_sync = sync_wave_target_n_live_state(
-                    cfg,
-                    df,
-                    waves,
-                    seq_info,
-                    birth_by_time=ext_runtime._wave_birth_by_time,
-                    last_bar_idx=last_bar_idx,
-                    active_counter_wave_times=get_active_counter_wave_times(cfg),
-                )
-                processed_tp_wave_times |= _tp_sync.processed_tp_wave_times
-
-                g_tp_cycle_counter_placed = False
-                g_tp_cycle_fallback_birth = False
-                g_tp_cycle_extension_done = False
-
-                if wave_target_n_early_g_enabled(cfg):
-                    forming_tp_watch = _tp_sync.forming_tp_watch
-                    if _tp_sync.catch_up_extension and forming_tp_watch is not None:
-                        try:
-                            ext_stats = close_positions_on_extension_tp_hit(
-                                cfg,
-                                trend_dir=int(_tp_sync.catch_up_trend_dir),
-                                armed_tp=float(_tp_sync.catch_up_armed_tp or 0.0),
-                                bar_high=float(_tp_sync.catch_up_high or 0.0),
-                                bar_low=float(_tp_sync.catch_up_low or 0.0),
-                                bar_close=float(_tp_sync.catch_up_close or 0.0),
-                                bar_open=float(_tp_sync.catch_up_open or 0.0),
-                                ext1_protection_per_bar=ext1_per_bar,
-                                current_bar_idx=int(_tp_sync.catch_up_bar or last_bar_idx),
-                                wave_birth_by_time=ext_runtime._wave_birth_by_time,
-                                main_trend_dir=(
-                                    1 if current_trend == "bull"
-                                    else -1 if current_trend == "bear" else 0
-                                ),
-                            )
-                            forming_tp_watch.extension_hit_done = True
-                            g_tp_cycle_extension_done = True
-                            log_event(
-                                cfg,
-                                "info",
-                                "TP_EXTENSION_CATCH_UP",
-                                catch_up_bar=int(_tp_sync.catch_up_bar or -1),
-                                armed_tp=float(_tp_sync.catch_up_armed_tp or 0.0),
-                                trend_dir_closed=int(ext_stats["trend_dir_closed"]),
-                            )
-                            if _g_extension_hit_closed_positions(ext_stats):
-                                _place_live_counter_from_g_extension(
-                                    cfg=cfg,
-                                    watch=forming_tp_watch,
-                                    entries_allowed=entries_allowed,
-                                )
-                            g_tp_cycle_counter_placed = bool(
-                                forming_tp_watch.counter_placed
-                            )
-                        except Exception as e:
-                            log.error(
-                                "TP_EXTENSION catch-up selhal: %s", e, exc_info=True,
-                            )
-
-                if wave_target_n_early_g_enabled(cfg):
-                    for w in waves:
-                        if int(w.get("draw_right", -1)) != last_bar_idx:
-                            continue
-                        wt = str(w["wave_time"])
-                        info = seq_info.get(wt)
-                        if info is None or info.index_in_trend is None:
-                            continue
-                        idx = int(info.index_in_trend)
-                        if is_tp_wave_index(idx, target_n):
-                            if forming_tp_watch is not None:
-                                g_tp_cycle_counter_placed = bool(
-                                    forming_tp_watch.counter_placed
-                                )
-                                if (
-                                    not forming_tp_watch.extension_hit_done
-                                    and tp_wave_early_fallback_birth(cfg)
-                                ):
-                                    g_tp_cycle_fallback_birth = True
-                            forming_tp_watch = None
-                            continue
-                        new_watch = start_forming_tp_watch(
-                            prev_wave=w,
-                            index_in_trend=idx,
-                            target_n=target_n,
-                            start_bar=last_bar_idx,
-                        )
-                        if new_watch is not None:
-                            forming_tp_watch = new_watch
-
-                    if (
-                        wave_target_n_extension_exit_enabled(cfg)
-                        and forming_tp_watch is not None
-                        and not forming_tp_watch.extension_hit_done
-                    ):
-                        forming_tp_watch.update_extreme(bar_high, bar_low)
-                        forming_tp_watch.try_arm(cfg)
-                        if forming_tp_watch.armed and extension_tp_hit_on_bar(
-                            forming_tp_watch,
-                            high=bar_high,
-                            low=bar_low,
-                            close=bar_close,
-                            open_=bar_open,
-                        ):
-                            try:
-                                ext_stats = close_positions_on_extension_tp_hit(
-                                    cfg,
-                                    trend_dir=int(forming_tp_watch.trend_dir),
-                                    armed_tp=float(forming_tp_watch.armed_tp or 0.0),
-                                    bar_high=bar_high,
-                                    bar_low=bar_low,
-                                    bar_close=bar_close,
-                                    bar_open=bar_open,
-                                    ext1_protection_per_bar=ext1_per_bar,
-                                    current_bar_idx=last_bar_idx,
-                                    wave_birth_by_time=ext_runtime._wave_birth_by_time,
-                                    main_trend_dir=(
-                                        1 if current_trend == "bull"
-                                        else -1 if current_trend == "bear" else 0
-                                    ),
-                                )
-                                forming_tp_watch.extension_hit_done = True
-                                g_tp_cycle_extension_done = True
-                                log_event(
-                                    cfg,
-                                    "info",
-                                    "TP_EXTENSION_HIT",
-                                    armed_tp=float(forming_tp_watch.armed_tp or 0.0),
-                                    trend_dir=int(forming_tp_watch.trend_dir),
-                                    trend_dir_closed=int(ext_stats["trend_dir_closed"]),
-                                    wave_counters_closed=int(
-                                        ext_stats["wave_counter_closed"]
-                                    ),
-                                    sl_protected=int(ext_stats["sl_protected"]),
-                                    bar_close=float(bar_close),
-                                )
-                                if _g_extension_hit_closed_positions(ext_stats):
-                                    _place_live_counter_from_g_extension(
-                                        cfg=cfg,
-                                        watch=forming_tp_watch,
-                                        entries_allowed=entries_allowed,
-                                    )
-                                    g_tp_cycle_counter_placed = bool(
-                                        forming_tp_watch.counter_placed
-                                    )
-                            except Exception as e:
-                                log.error(
-                                    "TP_EXTENSION close_positions selhal: %s",
-                                    e,
-                                    exc_info=True,
-                                )
-
-                for w in waves:
-                    w.pop("wave_target_tp_price", None)
-                    info = seq_info.get(w["wave_time"])
-                    if info is None:
-                        continue
-                    idx = info.index_in_trend if info else None
-                    if idx is None:
-                        continue
-                    if not is_tp_wave_index(idx, target_n):
-                        continue
-                    prev_w = find_wave_by_time(waves, info.prev_same_dir_in_trend_wave_time)
-                    tp_price = compute_wave_target_tp_price(w, prev_w, cfg)
-                    if tp_price is not None:
-                        w["wave_target_tp_price"] = float(tp_price)
-
-                # ───── TP-WAVE EVENT (live) ─────
-                # Backtest-aligned: aktivne zavre dle should_close_trade_on_tp_wave_n
-                # (trend-dir + CNTR/TS2 + EXT block E23_/ECT_/ECB_).
-                # a wave counter (CNTR_) na TP-vlne N. Pendingy se nemeni.
-                for w in waves:
-                    wt = w["wave_time"]
-                    if wt in processed_tp_wave_times:
-                        continue
-                    if int(w.get("draw_right", -1)) != last_bar_idx:
-                        continue
-
-                    try:
-                        # UZIV. POZADAVEK: V live se musi zkusit callnout TP_WAVE_N i kdyz tp_raw chybí,
-                        # protože tp_mode=wave_target_n primárně zavírá na narození vlny W(N)
-                        # (legacy), nebo dříve na extension hit (varianta G: tp_wave_early_mode=
-                        # forming_qualified + tp_wave_exit_on=extension_hit). Bez toho se neshoduje
-                        # backtest a live a 4. vlny občas ignorují TP.
-                        
-                        # Ziskame idx
-                        # Musíme ale ověřit, jestli tahle vlna je ta TP vlna (idx 4 apod.)
-                        if "index_in_trend" not in w or w["index_in_trend"] is None:
-                            continue
-                        idx = w["index_in_trend"]
-                        target_n = int(getattr(cfg, "tp_target_wave_index", 0) or 0)
-                        if not is_tp_wave_index(idx, target_n):
-                            continue
-
-                        if (
-                            wave_target_n_early_g_enabled(cfg)
-                            and g_tp_cycle_extension_done
-                        ):
-                            processed_tp_wave_times.add(wt)
-                            continue
-                        if (
-                            wave_target_n_early_g_enabled(cfg)
-                            and forming_tp_watch is not None
-                        ):
-                            if forming_tp_watch.extension_hit_done:
-                                forming_tp_watch = None
-                                processed_tp_wave_times.add(wt)
-                                continue
-                            if not tp_wave_early_fallback_birth(cfg):
-                                forming_tp_watch = None
-                                processed_tp_wave_times.add(wt)
-                                continue
-                        forming_tp_watch = None
-
-                        tp_raw = w.get("wave_target_tp_price", 0.0)
-
-                        info = seq_info.get(wt)
-                        if info is None:
-                            continue
-                        trend_dir = int(w["dir"])
-                        tp_price = float(tp_raw) if tp_raw is not None else 0.0
-                        
-                        close_stats = close_positions_on_tp_wave_n(
-                            cfg,
-                            trend_dir=trend_dir,
-                            bar_high=bar_high,
-                            bar_low=bar_low,
-                            bar_close=bar_close,
-                            reason="TP_WAVE_N",
-                            ext1_protection_per_bar=ext1_per_bar,
-                            current_bar_idx=last_bar_idx,
-                            current_wave_time=str(wt),
-                            wave_birth_by_time=ext_runtime._wave_birth_by_time,
-                            main_trend_dir=1 if current_trend == "bull" else -1 if current_trend == "bear" else 0,
-                        )
-
-                        processed_tp_wave_times.add(wt)
-                        log_event(
-                            cfg, "info", "TP_WAVE_EVENT",
-                            wave_time=str(wt),
-                            wave_dir=int(trend_dir),
-                            tp_price=float(tp_price),
-                            trend_dir_closed=int(close_stats["trend_dir_closed"]),
-                            wave_counters_closed=int(close_stats["wave_counter_closed"]),
-                            two_sided_closed=int(close_stats.get("two_sided_closed", 0)),
-                            sl_protected=int(close_stats["sl_protected"]),
-                            bar_close=float(bar_close),
-                        )
-                        if (
-                            wave_target_n_early_g_enabled(cfg)
-                            and g_tp_cycle_fallback_birth
-                            and not g_tp_cycle_counter_placed
-                        ):
-                            _place_live_counter_position(
-                                cfg=cfg,
-                                wave=w,
-                                info=info,
-                                trend_dir=trend_dir,
-                                tp_price=float(tp_price) if tp_price else float(tp_raw or 0.0),
-                                all_waves=waves,
-                                entries_allowed=entries_allowed,
-                            )
-
-                    except Exception as e:
-                        log.error(f"TP_WAVE close_positions_on_tp_wave_n selhal: {e}", exc_info=True)
+                    _tp_bar_result = run_wave_target_n_bar_cycle(
+                        cfg=cfg,
+                        df=df,
+                        waves=waves,
+                        seq_info=seq_info,
+                        bar_idx=last_bar_idx,
+                        birth_by_time=ext_runtime._wave_birth_by_time,
+                        active_counter_wave_times=get_active_counter_wave_times(cfg),
+                        processed_tp_wave_times=processed_tp_wave_times,
+                        forming_tp_watch=forming_tp_watch,
+                        ext1_per_bar=ext1_per_bar,
+                        current_trend=current_trend,
+                        entries_allowed=entries_allowed,
+                        bar_high=float(_bar_high or 0.0),
+                        bar_low=float(_bar_low or 0.0),
+                        bar_close=(
+                            float(_last_bar["close"])
+                            if _last_bar is not None
+                            else float(bar_entry_close)
+                        ),
+                        bar_open=(
+                            float(_last_bar["open"])
+                            if _last_bar is not None
+                            else float(bar_entry_close)
+                        ),
+                        place_g_extension_counter=_place_live_counter_from_g_extension,
+                        g_extension_closed=_g_extension_hit_closed_positions,
+                        place_fallback_counter=_place_live_counter_position,
+                        log_event_fn=log_event,
+                    )
+                    forming_tp_watch = _tp_bar_result.forming_tp_watch
+                except Exception as e:
+                    log.error(
+                        "WAVE_TARGET_N bar cycle selhal: %s", e, exc_info=True,
+                    )
 
             # Po vyhodnoceni BOS-exit / TP-wave eventu aktualizuj last_known_trend_dir
             # pro pristi cyklus (slouzi k detekci skutecneho flipu).
@@ -1845,7 +1765,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 last_known_trend_dir = current_trend
             if not df.empty:
                 prev_cycle_last_bar_time = pd.Timestamp(
-                    df["time"].iloc[-1]
+                    df["time"].iloc[last_bar_idx]
                 ).to_pydatetime()
 
             # ───── PP BREAK DETEKCE (cfg.pp_enabled) ─────
@@ -1860,7 +1780,9 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 if bar_trend_states is None:
                     bar_trend_states = compute_trend_states_per_bar(df, waves, cfg)
                 current_trend_local = (
-                    bar_trend_states[-1].direction if bar_trend_states else "neutral"
+                    bar_trend_states[last_bar_idx].direction
+                    if bar_trend_states and last_bar_idx < len(bar_trend_states)
+                    else "neutral"
                 )
 
                 if current_trend_local in ("bull", "bear"):
@@ -1901,6 +1823,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                                 processed_pp_wave_times=processed_pp_wave_times,
                                 wave_birth_by_time=ext_runtime._wave_birth_by_time,
                                 entries_allowed=entries_allowed,
+                                bar_idx=last_bar_idx,
                             )
                         except Exception as e:
                             log.error(f"PP break detekce selhala: {e}", exc_info=True)
@@ -1925,9 +1848,19 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
             mt5_connected_now = bool(mt5.terminal_info()) and bool(mt5.account_info())
             if mt5_connected_now and not was_mt5_connected:
                 log_event(cfg, "info", "MT5_CONNECTION", status="RECONNECTED")
+                from runtime.wave_target_n_live import reset_wave_target_n_runtime_state
+
+                processed_tp_wave_times, forming_tp_watch = (
+                    reset_wave_target_n_runtime_state()
+                )
             was_mt5_connected = mt5_connected_now
 
             if mt5_connected_now and failed_signals:
+                from runtime.failed_signals_replay import (
+                    abandon_failed_signal,
+                    failed_signal_replay_eligible,
+                )
+
                 replay_keys = list(failed_signals.keys())
                 for sig_key in replay_keys:
                     record = failed_signals.get(sig_key)
@@ -1946,20 +1879,39 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                             wave["move_pct"], cfg, is_ext=is_ext_wave(wave, cfg),
                         )
                     ):
-                        failed_signals.pop(sig_key, None)
-                        sent_signals.add(sig_key)
+                        abandon_failed_signal(
+                            cfg=cfg,
+                            sig_key=sig_key,
+                            wave_time=str(wt),
+                            sent_signals=sent_signals,
+                            failed_signals=failed_signals,
+                            reason="stale_or_filter",
+                        )
                         continue
                     if bool(wave.get("post_ext_trend_suppressed", False)):
-                        failed_signals.pop(sig_key, None)
-                        sent_signals.add(sig_key)
+                        abandon_failed_signal(
+                            cfg=cfg,
+                            sig_key=sig_key,
+                            wave_time=str(wt),
+                            sent_signals=sent_signals,
+                            failed_signals=failed_signals,
+                            reason="post_ext_suppressed",
+                        )
                         continue
-                    if not _wave_born_on_last_bar(
-                        wt,
+                    if not failed_signal_replay_eligible(
+                        str(wt),
                         wave_birth_by_time=_wave_birth_by_time,
                         last_bar_idx=last_bar_idx,
+                        new_bar_indices=new_bar_indices,
                     ):
-                        failed_signals.pop(sig_key, None)
-                        sent_signals.add(sig_key)
+                        abandon_failed_signal(
+                            cfg=cfg,
+                            sig_key=sig_key,
+                            wave_time=str(wt),
+                            sent_signals=sent_signals,
+                            failed_signals=failed_signals,
+                            reason="birth_bar_passed",
+                        )
                         continue
                     # TREND FILTER (BOS) — replay nesmi filter obejit.
                     # Trend state hodnotime aktualnim snapshotem k baru narozeni vlny;
@@ -1969,8 +1921,14 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         if ts is None:
                             ts = trend_states_per_wave.get(str(wt))
                         if ts is None:
-                            failed_signals.pop(sig_key, None)
-                            sent_signals.add(sig_key)
+                            abandon_failed_signal(
+                                cfg=cfg,
+                                sig_key=sig_key,
+                                wave_time=str(wt),
+                                sent_signals=sent_signals,
+                                failed_signals=failed_signals,
+                                reason="no_trend_state",
+                            )
                             log_event(
                                 cfg,
                                 "info",
@@ -1981,8 +1939,14 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                             continue
                         allowed, _reason = wave_allowed_for_entry(wave, ts, cfg)
                         if not allowed:
-                            failed_signals.pop(sig_key, None)
-                            sent_signals.add(sig_key)
+                            abandon_failed_signal(
+                                cfg=cfg,
+                                sig_key=sig_key,
+                                wave_time=str(wt),
+                                sent_signals=sent_signals,
+                                failed_signals=failed_signals,
+                                reason=f"trend_filter:{_reason}",
+                            )
                             continue
                     if sig_key in sent_signals or sig_key in active_signal_keys:
                         failed_signals.pop(sig_key, None)
@@ -1990,6 +1954,17 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         continue
 
                     if not bool(getattr(cfg, "wave_position_enabled", True)):
+                        if _try_live_counter_only_on_wave(
+                            cfg=cfg,
+                            wave=wave,
+                            seq_info=seq_info,
+                            all_waves=waves,
+                            entries_allowed=entries_allowed,
+                            sent_signals=sent_signals,
+                            sig_key=sig_key,
+                        ):
+                            failed_signals.pop(sig_key, None)
+                            continue
                         failed_signals.pop(sig_key, None)
                         sent_signals.add(sig_key)
                         continue
@@ -2017,6 +1992,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         entry_mode=cfg.entry_mode,
                         placed_meta=placed_meta,
                         trend_state_at_fill=fill_trend_state,
+                        bar_close=bar_entry_close,
                     ):
                         _maybe_place_live_counter_from_tp(
                             cfg=cfg,
@@ -2069,6 +2045,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                             ext_sl_anchor=ext_sl_anchor,
                             seq_info=seq_info,
                             waves=waves,
+                            bar_close=bar_entry_close,
                         )
                         if _retro_sent:
                             new_signal_sent = True
@@ -2150,6 +2127,16 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         continue
 
                     if not bool(getattr(cfg, "wave_position_enabled", True)):
+                        if _try_live_counter_only_on_wave(
+                            cfg=cfg,
+                            wave=wave,
+                            seq_info=seq_info,
+                            all_waves=waves,
+                            entries_allowed=entries_allowed,
+                            sent_signals=sent_signals,
+                            sig_key=sig_key,
+                        ):
+                            continue
                         sent_signals.add(sig_key)
                         continue
 
@@ -2222,6 +2209,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                                     entry_mode=cfg.entry_mode,
                                     trend_state_at_fill=fill_trend_state,
                                     is_two_sided_mirror=True,
+                                    bar_close=bar_entry_close,
                                 ):
                                     sent_signals.add(sig_key)
                                     failed_signals.pop(sig_key, None)
@@ -2335,6 +2323,16 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         continue
 
                     if not bool(getattr(cfg, "wave_position_enabled", True)):
+                        if _try_live_counter_only_on_wave(
+                            cfg=cfg,
+                            wave=wave,
+                            seq_info=seq_info,
+                            all_waves=waves,
+                            entries_allowed=entries_allowed,
+                            sent_signals=sent_signals,
+                            sig_key=sig_key,
+                        ):
+                            continue
                         sent_signals.add(sig_key)
                         continue
 
@@ -2369,6 +2367,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         placed_meta=placed_meta,
                         trend_state_at_fill=fill_trend_state,
                         bypass_trend_filter=wave_bypass_trend_fill,
+                        bar_close=bar_entry_close,
                     ):
                         _maybe_place_live_counter_from_tp(
                             cfg=cfg,

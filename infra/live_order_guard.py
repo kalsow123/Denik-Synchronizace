@@ -122,6 +122,56 @@ def bos_reentry_already_in_mt5(cfg: BotConfig, broken_wave_time: str | None) -> 
     return False
 
 
+def deduplicate_magic_pendings(cfg: BotConfig) -> int:
+    """
+    Zruší duplicitní pending ordery se stejným commentem (stejná vlna/setup).
+    Ponechá nejstarší ticket. Vrací počet zrušených orderů.
+    """
+    orders = mt5.orders_get(symbol=cfg.symbol) or []
+    by_comment: dict[str, list] = {}
+    for o in orders:
+        if not _magic_matches(cfg, o):
+            continue
+        comment = str(getattr(o, "comment", "") or "")
+        if not comment:
+            continue
+        by_comment.setdefault(comment, []).append(o)
+
+    cancelled = 0
+    for comment, group in by_comment.items():
+        if len(group) <= 1:
+            continue
+        group.sort(key=lambda o: int(getattr(o, "ticket", 0)))
+        for dup in group[1:]:
+            ticket = int(dup.ticket)
+            req = {"action": mt5.TRADE_ACTION_REMOVE, "order": ticket}
+            result = mt5.order_send(req)
+            if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+                cancelled += 1
+                log.info(
+                    "DEDUP PENDING: zrusen duplicitni order #%s | comment=%s",
+                    ticket,
+                    comment,
+                )
+            else:
+                err = getattr(result, "comment", None) if result else mt5.last_error()
+                log.warning(
+                    "DEDUP PENDING: nelze zrusit #%s comment=%s | %s",
+                    ticket,
+                    comment,
+                    err,
+                )
+    if cancelled:
+        log_event(
+            cfg,
+            "warning",
+            "PENDING_DEDUP",
+            cancelled=int(cancelled),
+            message="Zruseny duplicitni pending ordery po recovery",
+        )
+    return cancelled
+
+
 def block_duplicate_wave_order(cfg: BotConfig, wave_time: str, *, label: str) -> bool:
     """
     Vrátí True, pokud má caller přeskočit odeslání (duplicita v MT5).

@@ -9,7 +9,6 @@ import argparse
 from datetime import datetime
 
 from config.bot_config import CONFIG_REGISTRY, LIVE_BOT_CONFIG
-from config.position_modes import resolve_grid_engine_config
 from core.logging_utils import (
     BOT_INSTANCE_ID,
     log_event,
@@ -20,7 +19,6 @@ from infra.mt5_client import connect, shutdown
 from infra.session_manager import is_session_enabled, is_in_session, get_broker_now
 from runtime.instance_lock import LiveInstanceAlreadyRunning, ensure_single_live_instance
 from runtime.live_loop import run_live_loop
-from runtime.startup import block_historical_waves, restore_all_pending_orders
 ACTIVE_CFG = LIVE_BOT_CONFIG
 
 
@@ -63,8 +61,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = resolve_grid_engine_config(_resolve_config(args.config))
+    cfg = _resolve_config(args.config)
+    from runtime.live_wave_isolation import (
+        audit_mt5_non_wave_exposure,
+        resolve_live_execution_config,
+    )
+
+    cfg = resolve_live_execution_config(cfg)
     ACTIVE_CFG = cfg
+
+    from runtime.live_wave_isolation import log_live_execution_mode
 
     # 1) Setup loggeru (pred lockem — pokus o 2. instanci se zapise do .jsonl)
     safe_bot_name = re.sub(r"[^A-Za-z0-9._-]+", "_", cfg.bot_name).strip("._-") or "bot"
@@ -76,6 +82,7 @@ def main() -> None:
         json_file=json_log_file,
         json_retention_days=cfg.jsonl_retention_days,
     )
+    log_live_execution_mode(cfg)
 
     try:
         ensure_single_live_instance(cfg)
@@ -93,6 +100,8 @@ def main() -> None:
     # 2) Connect do MT5
     if not connect(cfg):
         return
+
+    audit_mt5_non_wave_exposure(cfg)
 
     # 3) Hlavni BOT_START event
     log_event(
@@ -193,13 +202,9 @@ def main() -> None:
         sent_signals = set()
     else:
         # Standardni startup: session snapshot + pine recovery + blokace historickych vln
-        sent_signals = restore_all_pending_orders(cfg)
-        sent_signals = block_historical_waves(cfg, sent_signals)
+        from runtime.startup import run_full_startup_recovery
 
-        log.info(
-            f"Inicializace: startup recovery + blokace historickych vln "
-            f"pripravila {len(sent_signals)} signalu | Cekam na nove..."
-        )
+        sent_signals = run_full_startup_recovery(cfg)
 
     # ─── BOT_STOP / CRASH HANDLERS ────────────────────────
     _stop_logged = {"done": False}

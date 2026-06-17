@@ -54,11 +54,18 @@ class WfLiveRuntime:
         self._tracker = WickFakeoutTracker()
         self._last_processed_bar_time: Optional[pd.Timestamp] = None
         self._df_anchor_time: Optional[pd.Timestamp] = None
+        self._activation_results: list[WfWavePrepResult] = []
 
     def reset(self) -> None:
         self._tracker = WickFakeoutTracker()
         self._last_processed_bar_time = None
         self._df_anchor_time = None
+        self._activation_results = []
+
+    def pop_activation_results(self) -> list[WfWavePrepResult]:
+        out = self._activation_results[:]
+        self._activation_results = []
+        return out
 
     def _needs_resync(self, df: pd.DataFrame) -> bool:
         if df is None or df.empty:
@@ -140,6 +147,7 @@ class WfLiveRuntime:
             wf_wave=wf_wave,
             eval_result=wf_result,
             resumed_count=len(continued),
+            activation_bar_idx=int(bar_idx),
         )
 
     def process(
@@ -169,18 +177,16 @@ class WfLiveRuntime:
             self._df_anchor_time = _bar_ts(df, 0)
             return WfWavePrepResult()
 
-        if self._last_processed_bar_time is None:
-            self._replay_state_only(df, cfg, waves, birth)
-            self._last_processed_bar_time = _bar_ts(df, len(df) - 1)
-            self._df_anchor_time = _bar_ts(df, 0)
-            return WfWavePrepResult()
-
+        self._activation_results = []
         activation: Optional[WfWavePrepResult] = None
         ext_skipped: Optional[WfWavePrepResult] = None
 
         for i in range(1, len(df)):
             bar_time = _bar_ts(df, i)
-            if bar_time <= self._last_processed_bar_time:
+            if (
+                self._last_processed_bar_time is not None
+                and bar_time <= self._last_processed_bar_time
+            ):
                 continue
 
             row = df.iloc[i]
@@ -199,10 +205,13 @@ class WfLiveRuntime:
                         ext_skipped=True,
                         eval_result=wf_result,
                     )
-                elif wf_result.get("status") == "activate" and activation is None:
-                    activation = self._build_activation(
+                elif wf_result.get("status") == "activate":
+                    act = self._build_activation(
                         df, cfg, waves, wf_result, i,
                     )
+                    self._activation_results.append(act)
+                    if activation is None:
+                        activation = act
 
             for w in waves_by_bar.get(i, []):
                 if not bool(w.get("post_ext_trend_suppressed", False)):

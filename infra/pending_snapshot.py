@@ -215,6 +215,9 @@ def restore_pending_snapshot(
     snapshots: list[PendingOrderSnapshot],
 ) -> int:
     """Obnovi pending ordery ze snapshotu. Vraci pocet uspesne obnovenych."""
+    from runtime.live_wave_isolation import filter_wave_only_pending_snapshots
+
+    snapshots = filter_wave_only_pending_snapshots(cfg, snapshots)
     if not snapshots:
         return 0
 
