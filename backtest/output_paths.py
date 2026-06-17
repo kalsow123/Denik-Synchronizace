@@ -76,6 +76,34 @@ def next_daily_output_dir(
     return _next_increment_subdir(parent, f"{name}_{day}_")
 
 
+def live_match_output_dir(
+    base_output: str | Path,
+    symbol: str,
+    *,
+    config_name: str = "LIVE_BOT_CONFIG",
+    timeframe_label: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> Path:
+    """
+    Výstup live_match: {base_output}/{SYMBOL}/grid_{CONFIG}_{TF}_{date_from}_{date_to}_{NNN}/.
+
+    NNN = 001, 002, … pro stejný config + TF + období.
+    Příklad: results/EURUSD/grid_LIVE_BOT_M30_2025-11-10_2026-05-09_001/
+    """
+    base = Path(base_output)
+    sym = symbol_folder_name(symbol)
+    cfg_label = safe_path_part(config_name)
+    if cfg_label.upper().endswith("_CONFIG"):
+        cfg_label = cfg_label[: -len("_CONFIG")]
+    tf = safe_path_part(timeframe_label)
+    df = _date_range_label(date_from)
+    dt = _date_range_label(date_to)
+    parent = base / sym
+    prefix = f"grid_{cfg_label}_{tf}_{df}_{dt}_"
+    return _next_increment_subdir(parent, prefix)
+
+
 def _unique_ordered(values: Iterable[str]) -> list[str]:
     seen: list[str] = []
     for v in values:

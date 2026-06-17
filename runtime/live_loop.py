@@ -69,6 +69,7 @@ from strategy.trend_bos import (
     bos_flip_handler_should_run,
     tp_mode_uses_bos_per_bar_exit,
     wave_allowed_for_entry,
+    _wave_is_wf_origin,
 )
 from strategy.wave_detection import detect_waves
 from strategy.wave_sequence import (
@@ -97,9 +98,9 @@ from strategy.wave_target_n_early import (
 from strategy.two_sided import (
     TwoSidedTracker,
     find_parent_wave_for_two_sided,
-    parent_monitor_start_bar,
     parent_wave_qualifies,
     prepare_two_sided_counter_signal,
+    replay_two_sided_tracker_engine_parity,
     skip_primary_entry_on_parent_wave,
     should_open_two_sided_counter,
     two_sided_enabled,
@@ -112,6 +113,7 @@ from strategy.ext_logic import (
 from strategy.trend_bos import resolve_effective_tp
 from runtime.adx14_live import Adx14LiveRuntime
 from runtime.ext_live import ExtLiveRuntime
+from runtime.wf_live import WfLiveRuntime
 from runtime.wave_target_n_live import sync_wave_target_n_live_state
 
 # ───── LIVE BOT ──────────────────────────
@@ -125,15 +127,17 @@ _live_two_sided_tracker = TwoSidedTracker()
     Bezi neustale dokud neprijde KeyboardInterrupt nebo shutdown signal.
     V kazdem cyklu:
       0) SESSION MANAGER (pokud zapnuty): kontrola jestli je trading session.
-         - Pre-close buffer: zrusi pendingy (volitelne i pozice v patek)
-         - Mimo session: spi a kazdou ~minutu kontroluje
-         - Po wake-up: spusti startup recovery, pak normalni loop
+         - Pre-close buffer: snapshot vsech pendingu -> cancel (volitelne i pozice v patek)
+         - Po wake-up: obnovi snapshot (WAVE/CNTR/PP/EXT/...) + pine WAVE doplneni
       1) Zrusi expirovane pendingy.
-      2) Nacte poslednich 300 baru a detekuje vlny.
+      2) Nacte poslednich cfg.startup_bars baru z MT5 (ADX/housekeeping kazdych cfg.sleep_sec).
+         Strategie (vlny, BOS, TP-WAVE, vstupy, EXT/WF) jen pri novem uzavrenem M30 baru;
+         forming bar (-1) se pred detekci odstrani (parita backtest close-only).
       3) Sesynchronizuje signaly z MT5 (pendingy + pozice) do `sent_signals`.
       4) Projde vlny:
-           - prilis stare (> max_wave_age_hours) -> oznaci jako zpracovane, preskoci
+           - prilis stare (> max_wave_age_hours od posledniho close baru) -> oznaci jako zpracovane
            - mimo povolenou session -> oznaci jako zpracovane, preskoci
+           - birth_bar != posledni close bar -> preskoci (parita backtest; recovery jde jinou cestou)
            - jeste nezpracovane -> posle pres send_order() s `cfg.entry_mode`
       5) Time-based status logy a OLD_WAVES_SUMMARY (text vs jsonl lze ruzne periody).
     """
@@ -164,6 +168,220 @@ def _pp_calc_lot_live(cfg: BotConfig, entry_price: float, sl_price: float) -> fl
 
 def _log_adx14_entry_blocked(cfg: BotConfig, entry_type: str, **extra) -> None:
     log_event(cfg, "info", "ENTRY_BLOCKED_BY_ADX14_GATE", entry_type=entry_type, **extra)
+
+
+def _wave_birth_bar_index(wave_time: str, wave_birth_by_time: dict) -> int | None:
+    birth = wave_birth_by_time.get(wave_time)
+    if birth is None:
+        birth = wave_birth_by_time.get(str(wave_time))
+    if birth is None:
+        return None
+    return int(birth)
+
+
+def _wave_born_on_last_bar(
+    wave_time: str,
+    *,
+    wave_birth_by_time: dict,
+    last_bar_idx: int,
+) -> bool:
+    """Parita s backtest engine: vstup jen pro vlny narozene na poslednim close baru."""
+    birth = _wave_birth_bar_index(wave_time, wave_birth_by_time)
+    if birth is None:
+        return False
+    return birth == int(last_bar_idx)
+
+
+def _bos_flip_bar_for_wave(
+    wave_time: str,
+    bos_flip_map: dict[int, str],
+) -> int | None:
+    """Bar index close-based BOS flipu pro danou bos-vlnu (inverze flip mapy)."""
+    wt = str(wave_time)
+    for bar_ix, mapped_wt in bos_flip_map.items():
+        if str(mapped_wt) == wt:
+            return int(bar_ix)
+    return None
+
+
+def _apply_birth_bar_gate(
+    wave_time: str,
+    *,
+    wave_birth_by_time: dict,
+    last_bar_idx: int,
+    sent_signals: Set[str],
+    sig_key: str,
+    bos_flip_bar: int | None = None,
+    is_bos_retro_candidate: bool = False,
+) -> bool:
+    """
+    True = pokracovat na send_order (vlna narozena na poslednim baru).
+    False = preskocit; pri minulem birth baru oznacit sig_key jako zpracovany.
+
+    BOS retro vlny (wave_against_trend cekajici na flip) se pred flip barem
+    neoznacuji jako permanently missed — parita s engine `_bos_flip_wave_by_bar`.
+    Vstup z retro probehne v `_attempt_live_bos_retro_entry` na flip baru.
+    Startup recovery / MT5 pending sync birth_bar gate neobchazi — tam se send_order nevolá.
+    """
+    birth = _wave_birth_bar_index(wave_time, wave_birth_by_time)
+    if birth is None:
+        return False
+    if birth == int(last_bar_idx):
+        return True
+    if birth < int(last_bar_idx):
+        if (
+            is_bos_retro_candidate
+            and bos_flip_bar is not None
+            and int(last_bar_idx) < int(bos_flip_bar)
+        ):
+            return False
+        sent_signals.add(sig_key)
+    return False
+
+
+def _attempt_live_bos_retro_entry(
+    *,
+    cfg: BotConfig,
+    wave: dict,
+    last_bar_idx: int,
+    last_bar_time: datetime,
+    wave_birth_by_time: dict,
+    bos_flip_map: dict[int, str],
+    sent_signals: Set[str],
+    failed_signals: Dict[str, Dict[str, Any]],
+    retro_bos_attempted: Set[str],
+    signal_digits: int,
+    entries_allowed: bool,
+    fill_trend_state: Any,
+    ext_sl_anchor: Optional[dict],
+    seq_info: dict,
+    waves: list,
+) -> tuple[bool, Optional[dict]]:
+    """
+    BOS retro aktivace na close-based flip baru — parita engine
+    `_bos_flip_wave_by_bar` + `_process_new_wave(bypass_trend_filter=True)`.
+
+    Same-bar birth+flip resi hlavni wave loop (trend filter retro bypass).
+    """
+    wt = str(wave.get("wave_time", "") or "")
+    if not wt or wt in retro_bos_attempted:
+        return False, ext_sl_anchor
+
+    birth = _wave_birth_bar_index(wt, wave_birth_by_time)
+    if birth is None or birth >= int(last_bar_idx):
+        return False, ext_sl_anchor
+
+    flip_bar = _bos_flip_bar_for_wave(wt, bos_flip_map)
+    if flip_bar is None or int(flip_bar) != int(last_bar_idx):
+        return False, ext_sl_anchor
+
+    if _wave_is_wf_origin(wave):
+        return False, ext_sl_anchor
+
+    sig_key = get_signal_key(wave, digits=signal_digits)
+    if sig_key in sent_signals:
+        retro_bos_attempted.add(wt)
+        return False, ext_sl_anchor
+
+    retro_bos_attempted.add(wt)
+
+    if bool(wave.get("post_ext_trend_suppressed", False)):
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if is_wave_too_old(wt, cfg, ref_time=last_bar_time):
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if not is_wave_in_allowed_session(wt, cfg):
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if is_wave_too_large(wave["move_pct"], cfg, is_ext=is_ext_wave(wave, cfg)):
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if not bool(getattr(cfg, "wave_position_enabled", True)):
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if not entries_allowed:
+        _log_adx14_entry_blocked(cfg, entry_type="WAVE_BOS_RETRO", wave_id=wt)
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    wave_order = wave
+    if is_ext_wave(wave, cfg):
+        ext_sl_anchor = wave
+    else:
+        wave_order, ext_sl_anchor = apply_first_opposite_wave_sl_after_ext(
+            wave,
+            ext_anchor=ext_sl_anchor,
+            cfg=cfg,
+        )
+
+    log.info(
+        f"BOS RETRO VLNA | {'BUY' if wave_order['dir'] == 1 else 'SELL'} "
+        f"EP={wave_order['fib50']:.5f} SL={wave_order['sl']:.5f} "
+        f"TP={wave_order['tp']:.5f} | Wave {wave_order['move_pct']:.2f}% | {wt}"
+    )
+    log_event(
+        cfg,
+        "info",
+        "WAVE_BOS_RETRO_ENTRY",
+        wave_id=wt,
+        flip_bar=int(flip_bar),
+        birth_bar=int(birth),
+    )
+
+    placed_meta: Dict[str, Any] = {}
+    if send_order(
+        wave_order,
+        cfg,
+        entry_mode=cfg.entry_mode,
+        placed_meta=placed_meta,
+        trend_state_at_fill=fill_trend_state,
+        bypass_trend_filter=True,
+    ):
+        _maybe_place_live_counter_from_tp(
+            cfg=cfg,
+            wave=wave_order,
+            seq_info=seq_info,
+            tp_price=placed_meta.get("tp_price"),
+            all_waves=waves,
+            entries_allowed=entries_allowed,
+        )
+        sent_signals.add(sig_key)
+        failed_signals.pop(sig_key, None)
+        return True, ext_sl_anchor
+
+    prev = failed_signals.get(sig_key, {"wave": wave_order, "attempts": 0})
+    prev["wave"] = wave_order
+    prev["attempts"] = int(prev.get("attempts", 0)) + 1
+    failed_signals[sig_key] = prev
+    log_event(
+        cfg,
+        "warning",
+        "WAVE_BOS_RETRO_FAILED",
+        wave_id=wt,
+        flip_bar=int(flip_bar),
+        attempts=int(prev["attempts"]),
+    )
+    return False, ext_sl_anchor
+
+
+def _last_closed_bar_time(df: pd.DataFrame) -> pd.Timestamp:
+    """Posledni uzavreny bar: MT5 posledni radek je forming bar (-1), close je -2."""
+    if len(df) < 2:
+        return pd.Timestamp(df["time"].iloc[-1])
+    return pd.Timestamp(df["time"].iloc[-2])
+
+
+def _df_closed_bars_only(df: pd.DataFrame) -> pd.DataFrame:
+    """Strategie bezi jen na uzavrenych barech — odstrani forming bar z MT5."""
+    if len(df) < 2:
+        return df
+    return df.iloc[:-1].reset_index(drop=True)
 
 
 def _maybe_fire_pp_break_event(*, cfg: BotConfig, df, waves,
@@ -621,15 +839,18 @@ def _maybe_place_live_counter_from_tp(
 
 
 def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
-    from config.position_modes import apply_wave_positions_only_to_bot_config
+    from config.position_modes import resolve_grid_engine_config
 
-    cfg = apply_wave_positions_only_to_bot_config(cfg)
+    cfg = resolve_grid_engine_config(cfg)
     if bool(getattr(cfg, "wave_positions_only", False)):
         log_event(
             cfg,
             "info",
             "WAVE_POSITIONS_ONLY",
-            message="Live: jen klasické WAVE pozice, ostatní moduly vynuceně vypnuté",
+            message=(
+                "Live: WAVE report slice + engine counter/EXT kontext "
+                "(wave_isolation_study filtruje report jako grid combo 2)"
+            ),
         )
     # Pri startu bota odpalime STATUS hned (timer nastaven do minulosti
     # tak, aby prvni kontrola v loopu hned vystrelila log).
@@ -666,6 +887,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
     was_outside_session: bool = False  # detekce wake-up (mimo session -> v session)
     # Signaly, ktere nesly odeslat (typicky transient MT5 chyba), drzi se pro replay.
     failed_signals: Dict[str, Dict[str, Any]] = {}
+    retro_bos_attempted: Set[str] = set()
     # Posledni EXT vlna cekajici na prvni opacnou (WAVE SL na ext_low/ext_high).
     ext_sl_anchor: Optional[dict] = None
     was_mt5_connected: bool = True
@@ -676,6 +898,8 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
     last_known_trend_dir: str | None = None  # "bull" / "bear" / None
     # Cas posledniho close baru z predchoziho cyklu (close-BOS flip jen na novejsich barech).
     prev_cycle_last_bar_time: Optional[datetime] = None
+    # Posledni uzavreny bar, na kterem uz probehla strategie (5s polling preskoci duplicitu).
+    last_processed_closed_bar_time: Optional[pd.Timestamp] = None
 
     # WAVE_TARGET_N — TP-vlny W(N) uz zpracovane; forming_tp_watch pro G.
     # Po restartu / kazdem cyklu sync z historickych vln + MT5 CNTR_ (parita backtest).
@@ -688,6 +912,136 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
     pp_latest_wave_by_trend: Dict[str, str] = {}
     ext_runtime = ExtLiveRuntime()
     ext_runtime.sync_from_mt5(cfg)
+    wf_runtime = WfLiveRuntime()
+
+    def _emit_live_periodic_logs(
+        *,
+        old_waves_this_cycle: int = 0,
+        skipped_session_this_cycle: int = 0,
+        skipped_trend_filter_this_cycle: int = 0,
+    ) -> None:
+        nonlocal last_heartbeat_time
+        nonlocal last_status_text_time, last_status_jsonl_time
+        nonlocal last_old_waves_text_time, last_old_waves_jsonl_time
+        nonlocal old_waves_since_last_text, skipped_session_since_last_text
+        nonlocal old_waves_since_last_jsonl, skipped_session_since_last_jsonl
+        nonlocal skipped_trend_filter_since_last_text, skipped_trend_filter_since_last_jsonl
+
+        old_waves_since_last_text += old_waves_this_cycle
+        skipped_session_since_last_text += skipped_session_this_cycle
+        old_waves_since_last_jsonl += old_waves_this_cycle
+        skipped_session_since_last_jsonl += skipped_session_this_cycle
+        skipped_trend_filter_since_last_text += skipped_trend_filter_this_cycle
+        skipped_trend_filter_since_last_jsonl += skipped_trend_filter_this_cycle
+
+        now_local = get_broker_now(cfg)
+
+        if now_local - last_heartbeat_time >= timedelta(seconds=heartbeat_interval_sec):
+            log_event(
+                cfg, "info", "HEARTBEAT",
+                uptime_sec=int(time.time() - bot_start_ts),
+            )
+            last_heartbeat_time = now_local
+
+        text_status_due = (
+            cfg.status_log_text_hours > 0
+            and now_local - last_status_text_time >= timedelta(hours=cfg.status_log_text_hours)
+        )
+        jsonl_status_due = (
+            cfg.status_log_jsonl_hours > 0
+            and now_local - last_status_jsonl_time >= timedelta(hours=cfg.status_log_jsonl_hours)
+        )
+        if text_status_due or jsonl_status_due:
+            snap = get_account_snapshot(cfg)
+
+            if snap.valid:
+                status_kwargs = dict(
+                    balance=float(snap.balance),
+                    equity=float(snap.equity),
+                    profit_total=float(snap.profit_total),
+                    profit_bot=float(snap.profit_bot),
+                    margin=float(snap.margin),
+                    margin_free=float(snap.margin_free),
+                    margin_level=float(snap.margin_level) if snap.margin > 0 else None,
+                    open_positions=int(snap.open_positions),
+                    pending_orders=int(snap.pending_orders),
+                    currency=str(snap.currency),
+                )
+                if text_status_due:
+                    log_event(
+                        cfg,
+                        "info",
+                        "STATUS",
+                        log_targets=LOG_TARGETS_TEXT_SINKS,
+                        **status_kwargs,
+                    )
+                    last_status_text_time = now_local
+                if jsonl_status_due:
+                    log_event(
+                        cfg,
+                        "info",
+                        "STATUS",
+                        log_targets=LOG_TARGETS_JSONL_ONLY,
+                        **status_kwargs,
+                    )
+                    last_status_jsonl_time = now_local
+            else:
+                log_event(
+                    cfg,
+                    "warning",
+                    "LOG",
+                    message="STATUS preskocen: MT5 account_info() vratilo None",
+                    logger="runtime.live_loop",
+                )
+                if text_status_due:
+                    last_status_text_time = now_local
+                if jsonl_status_due:
+                    last_status_jsonl_time = now_local
+
+        text_old_waves_due = (
+            cfg.old_waves_log_text_hours > 0
+            and now_local - last_old_waves_text_time >= timedelta(hours=cfg.old_waves_log_text_hours)
+        )
+        jsonl_old_waves_due = (
+            cfg.old_waves_log_jsonl_hours > 0
+            and now_local - last_old_waves_jsonl_time >= timedelta(hours=cfg.old_waves_log_jsonl_hours)
+        )
+        if text_old_waves_due or jsonl_old_waves_due:
+            summary_kwargs = dict(
+                max_wave_age_hours=cfg.max_wave_age_hours,
+                trend_filter_enabled=bool(cfg.trend_filter_enabled),
+                trend_hh_hl_filter_enabled=bool(cfg.trend_hh_hl_filter_enabled),
+            )
+            if text_old_waves_due:
+                log_event(
+                    cfg,
+                    "info",
+                    "OLD_WAVES_SUMMARY",
+                    log_targets=LOG_TARGETS_TEXT_SINKS,
+                    skipped_old_waves=old_waves_since_last_text,
+                    skipped_session_waves=skipped_session_since_last_text,
+                    skipped_trend_filter_waves=skipped_trend_filter_since_last_text,
+                    **summary_kwargs,
+                )
+                old_waves_since_last_text = 0
+                skipped_session_since_last_text = 0
+                skipped_trend_filter_since_last_text = 0
+                last_old_waves_text_time = now_local
+            if jsonl_old_waves_due:
+                log_event(
+                    cfg,
+                    "info",
+                    "OLD_WAVES_SUMMARY",
+                    log_targets=LOG_TARGETS_JSONL_ONLY,
+                    skipped_old_waves=old_waves_since_last_jsonl,
+                    skipped_session_waves=skipped_session_since_last_jsonl,
+                    skipped_trend_filter_waves=skipped_trend_filter_since_last_jsonl,
+                    **summary_kwargs,
+                )
+                old_waves_since_last_jsonl = 0
+                skipped_session_since_last_jsonl = 0
+                skipped_trend_filter_since_last_jsonl = 0
+                last_old_waves_jsonl_time = now_local
 
     while True:
         try:
@@ -708,6 +1062,11 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                             time=now.strftime("%H:%M:%S"),
                             buffer_min=cfg.session_pre_close_buffer_min,
                         )
+                        from infra.pending_snapshot import (
+                            capture_pending_snapshot,
+                            save_pending_snapshot,
+                        )
+                        save_pending_snapshot(cfg, capture_pending_snapshot(cfg))
                         cancel_all_pendings(cfg)
 
                         # V patek volitelne zavreme i pozice
@@ -754,12 +1113,13 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                     try:
                         from runtime.startup import (
                             block_historical_waves,
-                            restore_pine_style_pending_orders,
+                            restore_all_pending_orders,
                         )
-                        recovered = restore_pine_style_pending_orders(cfg)
+                        recovered = restore_all_pending_orders(cfg)
                         sent_signals |= recovered
                         sent_signals = block_historical_waves(cfg, sent_signals)
                         ext_runtime.sync_from_mt5(cfg)
+                        wf_runtime.reset()
                         log.info(
                             f"SESSION WAKE-UP RECOVERY: dohromady {len(sent_signals)} signalu"
                         )
@@ -807,7 +1167,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
             # Cancel expirovanych pendingu
             cancel_expired_pending(cfg)
 
-            df = get_bars(cfg, 300)
+            df = get_bars(cfg, cfg.startup_bars)
             if df is None:
                 log.warning("Nepodarilo se nacist data, zkousim znovu...")
                 time.sleep(cfg.sleep_sec)
@@ -821,17 +1181,34 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
 
             entries_allowed = adx14_runtime.entries_allowed
 
+            closed_bar_ts = _last_closed_bar_time(df)
+            if (
+                last_processed_closed_bar_time is not None
+                and closed_bar_ts <= last_processed_closed_bar_time
+            ):
+                _emit_live_periodic_logs()
+                continue
+
+            last_processed_closed_bar_time = closed_bar_ts
+            df = _df_closed_bars_only(df)
+
             waves = detect_waves(df, cfg)
             if not waves:
                 # POZN.: I bez vln muze byt aktivni BOS_EXIT (kdyz mam otevrene pozice
                 # a trend se mezi tim flipl). Pri zadne vlne ale nemame swing levels,
                 # takze trend stav by byl 'neutral' → nic se nezavre. Bezpecne preskocit.
-                time.sleep(cfg.sleep_sec)
+                _emit_live_periodic_logs()
                 continue
 
-            from strategy.wf_wave_list import prepare_waves_after_wf_eval
+            from strategy.wave_detection_pine import compute_wave_birth_bars_pine
 
-            wf_prep = prepare_waves_after_wf_eval(df, cfg, waves)
+            _wave_birth_for_wf = compute_wave_birth_bars_pine(df, cfg)
+            wf_prep = wf_runtime.process(
+                df,
+                cfg,
+                waves,
+                wave_birth_by_time=_wave_birth_for_wf,
+            )
             if wf_prep.ext_skipped and wf_prep.eval_result is not None:
                 log_event(
                     cfg,
@@ -855,13 +1232,12 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
             seq_info, protected_waves = sync_wave_sequence_state(df, waves, cfg)
 
             from strategy.ext_range import ext_range_enabled, reapply_ext_range_tags
-            from strategy.wave_detection_pine import compute_wave_birth_bars_pine
             from strategy.trend_bos import (
                 _detect_close_bos_timeline_flips,
                 reconcile_bos_flip_map_with_wave_sequence,
             )
 
-            _wave_birth_by_time = compute_wave_birth_bars_pine(df, cfg)
+            _wave_birth_by_time = _wave_birth_for_wf
             if ext_range_enabled(cfg):
                 reapply_ext_range_tags(
                     waves, cfg, df=df, wave_birth=_wave_birth_by_time
@@ -891,24 +1267,19 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
             )
             ext_runtime.run_ext1_rrr_better_exit(cfg, df)
             last_bar_idx = len(df) - 1
+            last_bar_time = pd.Timestamp(df["time"].iloc[-1]).to_pydatetime()
             ext1_per_bar = ext_runtime._ext1_protection_per_bar
 
             if two_sided_enabled(cfg):
                 global _live_two_sided_tracker
-                for w in waves:
-                    ts_parent = trend_states_per_wave.get(
-                        str(w.get("wave_time", ""))
-                    )
-                    if parent_wave_qualifies(w, cfg, trend_state=ts_parent):
-                        end_bar = int(w.get("draw_right", max(0, len(df) - 1)))
-                        _live_two_sided_tracker.register_parent(
-                            w,
-                            end_bar,
-                            cfg,
-                            df=df,
-                            sync_from_bar=parent_monitor_start_bar(w),
-                            trend_state=ts_parent,
-                        )
+                replay_two_sided_tracker_engine_parity(
+                    _live_two_sided_tracker,
+                    df,
+                    waves,
+                    cfg,
+                    wave_birth_by_time=_wave_birth_by_time,
+                    trend_states_per_wave=trend_states_per_wave,
+                )
 
             # ───── TP MODE: BOS_EXIT / BOS_EXIT_PRIORITY / WAVE_TARGET_N ─────
             # Pri techto rezimech zavreme vsechny otevrene pozice toho smeru,
@@ -1569,7 +1940,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         wave = fresh
                     # stale / invalid signaly uz nereplayujeme
                     if (
-                        is_wave_too_old(wt, cfg, now=now)
+                        is_wave_too_old(wt, cfg, ref_time=last_bar_time)
                         or not is_wave_in_allowed_session(wt, cfg)
                         or is_wave_too_large(
                             wave["move_pct"], cfg, is_ext=is_ext_wave(wave, cfg),
@@ -1579,6 +1950,14 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         sent_signals.add(sig_key)
                         continue
                     if bool(wave.get("post_ext_trend_suppressed", False)):
+                        failed_signals.pop(sig_key, None)
+                        sent_signals.add(sig_key)
+                        continue
+                    if not _wave_born_on_last_bar(
+                        wt,
+                        wave_birth_by_time=_wave_birth_by_time,
+                        last_bar_idx=last_bar_idx,
+                    ):
                         failed_signals.pop(sig_key, None)
                         sent_signals.add(sig_key)
                         continue
@@ -1667,6 +2046,33 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
             skipped_session_this_cycle = 0
             skipped_trend_filter_this_cycle = 0
 
+            # BOS retro aktivace — parita engine `_bos_flip_wave_by_bar` (vlny
+            # narozene drive, cekajici na close-based flip; same-bar resi hlavni loop).
+            if cfg.trend_filter_enabled and _bos_flip_map_live:
+                _retro_wt = _bos_flip_map_live.get(int(last_bar_idx))
+                if _retro_wt:
+                    _retro_wave = find_wave_by_time(waves, _retro_wt)
+                    if _retro_wave is not None:
+                        _retro_sent, ext_sl_anchor = _attempt_live_bos_retro_entry(
+                            cfg=cfg,
+                            wave=_retro_wave,
+                            last_bar_idx=last_bar_idx,
+                            last_bar_time=last_bar_time,
+                            wave_birth_by_time=_wave_birth_by_time,
+                            bos_flip_map=_bos_flip_map_live,
+                            sent_signals=sent_signals,
+                            failed_signals=failed_signals,
+                            retro_bos_attempted=retro_bos_attempted,
+                            signal_digits=signal_digits,
+                            entries_allowed=entries_allowed,
+                            fill_trend_state=fill_trend_state,
+                            ext_sl_anchor=ext_sl_anchor,
+                            seq_info=seq_info,
+                            waves=waves,
+                        )
+                        if _retro_sent:
+                            new_signal_sent = True
+
             for wave in waves:
                 wt = wave["wave_time"]
                 sig_key = get_signal_key(wave, digits=signal_digits)
@@ -1706,7 +2112,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                     continue
 
                 # 1) (volitelne, ale doporucene) nikdy neobchoduj nic starsi nez MAX_WAVE_AGE_HOURS
-                if is_wave_too_old(wt, cfg, now=now):
+                if is_wave_too_old(wt, cfg, ref_time=last_bar_time):
                     # oznac jako zpracovane, ale nikdy neposilej do send_order()
                     sent_signals.add(sig_key)
                     old_waves_this_cycle += 1
@@ -1727,6 +2133,22 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
 
                 # 5) nova vlna (v ramci casoveho okna), kterou jsme jeste nikdy neobchodovali
                 if sig_key not in sent_signals:
+                    _bos_flip_bar = (
+                        _bos_flip_bar_for_wave(wt, _bos_flip_map_live)
+                        if cfg.trend_filter_enabled
+                        else None
+                    )
+                    if not _apply_birth_bar_gate(
+                        wt,
+                        wave_birth_by_time=_wave_birth_by_time,
+                        last_bar_idx=last_bar_idx,
+                        sent_signals=sent_signals,
+                        sig_key=sig_key,
+                        bos_flip_bar=_bos_flip_bar,
+                        is_bos_retro_candidate=str(wt) in bos_wave_times,
+                    ):
+                        continue
+
                     if not bool(getattr(cfg, "wave_position_enabled", True)):
                         sent_signals.add(sig_key)
                         continue
@@ -1879,7 +2301,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                     allowed, reason = wave_allowed_for_entry(wave, ts, cfg)
                     # BOS vlna ZPUSOBI flip — vstup z teto vlny je vzdy
                     # povolen, i kdyz HH/HL/smer trendu by ji jinak zablokoval.
-                    if not allowed and str(wt) in bos_wave_times:
+                    if not allowed and str(wt) in bos_wave_times and not _wave_is_wf_origin(wave):
                         allowed, reason = True, "retro_after_bos_flip"
                         wave_bypass_trend_fill = True
                     if not allowed:
@@ -1984,123 +2406,11 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 ),
             )
 
-            old_waves_since_last_text += old_waves_this_cycle
-            skipped_session_since_last_text += skipped_session_this_cycle
-            old_waves_since_last_jsonl += old_waves_this_cycle
-            skipped_session_since_last_jsonl += skipped_session_this_cycle
-            skipped_trend_filter_since_last_text += skipped_trend_filter_this_cycle
-            skipped_trend_filter_since_last_jsonl += skipped_trend_filter_this_cycle
-
-            now = get_broker_now(cfg)
-
-            # HEARTBEAT — dle cfg.heartbeat_interval_sec
-            if now - last_heartbeat_time >= timedelta(seconds=heartbeat_interval_sec):
-                log_event(
-                    cfg, "info", "HEARTBEAT",
-                    uptime_sec=int(time.time() - bot_start_ts),
-                )
-                last_heartbeat_time = now
-
-            text_status_due = (
-                cfg.status_log_text_hours > 0
-                and now - last_status_text_time >= timedelta(hours=cfg.status_log_text_hours)
+            _emit_live_periodic_logs(
+                old_waves_this_cycle=old_waves_this_cycle,
+                skipped_session_this_cycle=skipped_session_this_cycle,
+                skipped_trend_filter_this_cycle=skipped_trend_filter_this_cycle,
             )
-            jsonl_status_due = (
-                cfg.status_log_jsonl_hours > 0
-                and now - last_status_jsonl_time >= timedelta(hours=cfg.status_log_jsonl_hours)
-            )
-            if text_status_due or jsonl_status_due:
-                snap = get_account_snapshot(cfg)
-
-                if snap.valid:
-                    status_kwargs = dict(
-                        balance=float(snap.balance),
-                        equity=float(snap.equity),
-                        profit_total=float(snap.profit_total),
-                        profit_bot=float(snap.profit_bot),
-                        margin=float(snap.margin),
-                        margin_free=float(snap.margin_free),
-                        margin_level=float(snap.margin_level) if snap.margin > 0 else None,
-                        open_positions=int(snap.open_positions),
-                        pending_orders=int(snap.pending_orders),
-                        currency=str(snap.currency),
-                    )
-                    if text_status_due:
-                        log_event(
-                            cfg,
-                            "info",
-                            "STATUS",
-                            log_targets=LOG_TARGETS_TEXT_SINKS,
-                            **status_kwargs,
-                        )
-                        last_status_text_time = now
-                    if jsonl_status_due:
-                        log_event(
-                            cfg,
-                            "info",
-                            "STATUS",
-                            log_targets=LOG_TARGETS_JSONL_ONLY,
-                            **status_kwargs,
-                        )
-                        last_status_jsonl_time = now
-                else:
-                    # Fallback: MT5 account_info nedostupne -> všude viditelné varování
-                    log_event(
-                        cfg,
-                        "warning",
-                        "LOG",
-                        message="STATUS preskocen: MT5 account_info() vratilo None",
-                        logger="runtime.live_loop",
-                    )
-                    if text_status_due:
-                        last_status_text_time = now
-                    if jsonl_status_due:
-                        last_status_jsonl_time = now
-
-            text_old_waves_due = (
-                cfg.old_waves_log_text_hours > 0
-                and now - last_old_waves_text_time >= timedelta(hours=cfg.old_waves_log_text_hours)
-            )
-            jsonl_old_waves_due = (
-                cfg.old_waves_log_jsonl_hours > 0
-                and now - last_old_waves_jsonl_time >= timedelta(hours=cfg.old_waves_log_jsonl_hours)
-            )
-            if text_old_waves_due or jsonl_old_waves_due:
-                summary_kwargs = dict(
-                    max_wave_age_hours=cfg.max_wave_age_hours,
-                    trend_filter_enabled=bool(cfg.trend_filter_enabled),
-                    trend_hh_hl_filter_enabled=bool(cfg.trend_hh_hl_filter_enabled),
-                )
-                if text_old_waves_due:
-                    log_event(
-                        cfg,
-                        "info",
-                        "OLD_WAVES_SUMMARY",
-                        log_targets=LOG_TARGETS_TEXT_SINKS,
-                        skipped_old_waves=old_waves_since_last_text,
-                        skipped_session_waves=skipped_session_since_last_text,
-                        skipped_trend_filter_waves=skipped_trend_filter_since_last_text,
-                        **summary_kwargs,
-                    )
-                    old_waves_since_last_text = 0
-                    skipped_session_since_last_text = 0
-                    skipped_trend_filter_since_last_text = 0
-                    last_old_waves_text_time = now
-                if jsonl_old_waves_due:
-                    log_event(
-                        cfg,
-                        "info",
-                        "OLD_WAVES_SUMMARY",
-                        log_targets=LOG_TARGETS_JSONL_ONLY,
-                        skipped_old_waves=old_waves_since_last_jsonl,
-                        skipped_session_waves=skipped_session_since_last_jsonl,
-                        skipped_trend_filter_waves=skipped_trend_filter_since_last_jsonl,
-                        **summary_kwargs,
-                    )
-                    old_waves_since_last_jsonl = 0
-                    skipped_session_since_last_jsonl = 0
-                    skipped_trend_filter_since_last_jsonl = 0
-                    last_old_waves_jsonl_time = now
 
         except Exception as e:
             log_event(

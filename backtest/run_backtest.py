@@ -7,14 +7,7 @@ ZAKLADNI POUZITI
   # 1) Otestovat aktualni LIVE config (jak ho ma bot ted nastaveny)
   python -m backtest.run_backtest --profile live_match
 
-  # 2) Otestovat konkretni pojmenovany config z bot_config.py
-  python -m backtest.run_backtest --profile live_match --config EXAMPLE_EURUSD_M15
-
-  # 3) Porovnat vice configu vedle sebe
-  python -m backtest.run_backtest --profile compare \\
-      --configs LIVE_BOT_CONFIG,EXAMPLE_EURUSD_M15
-
-  # 4) Pustit grid search (tisice kombinaci)
+  # 2) Pustit grid search (tisice kombinaci)
   python -m backtest.run_backtest --profile grid --grid-profile full_grid
   python -m backtest.run_backtest --profile grid --grid-profile bot_optimalisation
   python -m backtest.run_backtest --profile grid --grid-profile positions_setting
@@ -35,8 +28,9 @@ VOLBY
   --sequential          Spustit grid sekvencne (snazsi debugging)
   --print-grid-rankings Vypis TOP/BOTTOM do terminalu (default: vypnuto; vysledky v grid_report.xlsx)
   --top N               Pocet TOP/BOTTOM radku pri --print-grid-rankings (default: 10)
-  --output DIR          Koren vystupu (default: results/). Grid: results/{PÁR}/grid_{profil}_{TF}/
-                        (jedna slozka, opakovany beh prepise). + finalni grid_report.xlsx po dokonceni celeho gridu.
+  --output DIR          Koren vystupu (default: results/). live_match:
+                        results/{PÁR}/grid_{CONFIG}_{TF}_{od}_{do}_{NNN}/.
+                        Grid: results/{PÁR}/grid_{profil}_{TF}_{od}_{do}_{NNN}/.
   --visual-waves        Export struktury vln + obchodu jako Plotly HTML (vizual_waves_plotly_html v profilu jen pro visual_waves_enabled bez CLI).
   --visual-last-n N     Poslednich N vln v orezu (prepise visual_last_n_waves).
   --visual-bars K       Max. pocet baru v orezu (prepise visual_waves_max_bars).
@@ -47,7 +41,8 @@ VOLBY
   --plot-equity-html    S --plot uloz i Plotly HTML (kumul. PnL v case + periodicke PnL).
   --plot-monthly-kind-html  Měsíční PnL + max DD %% vs initial (ALL / WAVE / PP / BOS) do jednoho Plotly HTML.
   --plot-scroll-combined-html  Jeden HTML (scroll): equity (2) + měsíční druhy (4) + vlny (5), soubor *_equity_monthly_waves_scroll.html.
-                          live_match/compare: do --output. Grid: do <grid_dir>/plots_scroll_combined/ (stejne --grid-export-top-n).
+                          live_match: do results/{PÁR}/. compare: do --output s dennim inkrementem.
+                          Grid: do <grid_dir>/plots_scroll_combined/ (stejne --grid-export-top-n).
   --plot-interactive    Grid s --plot: vsechny uspesne kombinace v jednom grafu (vychozi bez nej = TOP 5; stejne soubory jako --plot-all).
   --grid-export-top-n N  Grid: druhy pruchod (--plot-trades, --plot-monthly-kind-html, --plot-scroll-combined-html, --visual-waves)
                           omez na top N podle projected_net_pnl_at_max_risk_usd (vsechny radky v xlsx).
@@ -103,11 +98,11 @@ from backtest.monthly_kind_html import write_monthly_kind_summary_html
 from backtest.profile_resolver import resolve_live_match, resolve_compare
 from backtest.grid.data_cache import csv_path_for, get_data_dir
 from backtest.output_paths import (
+    live_match_output_dir,
     next_daily_output_dir,
     output_symbol_for_config,
     output_symbol_for_configs,
     run_name_compare,
-    run_name_live_match,
 )
 
 
@@ -668,17 +663,51 @@ def _run_single_config(
         combo_for_visual,
         cli_visual=bool(args and getattr(args, "visual_waves", False)),
     ) or bool(args and getattr(args, "plot_scroll_combined_html", False))
-    engine = BacktestEngine(cfg, backtest_spread=spr, backtest_slippage=slip)
+    _combo = combo_for_visual or {}
+    cap_mode, cap_limit = ("off", None)
+    if _combo:
+        from backtest.grid.translator import grid_backtest_position_cap_settings
+
+        cap_mode, cap_limit = grid_backtest_position_cap_settings(_combo)
+    engine = BacktestEngine(
+        cfg,
+        backtest_position_cap_mode=cap_mode,
+        backtest_max_open_positions=cap_limit,
+        backtest_spread=spr,
+        backtest_slippage=slip,
+    )
     trades = engine.run(df, retain_wave_snapshot=retain_v)
     trades_df = trades_to_df(trades)
-    _combo = combo_for_visual or {}
+    from backtest.grid.study_mode import filter_trades_df_for_grid_stats
+
+    trades_df_stats = (
+        filter_trades_df_for_grid_stats(trades_df, _combo)
+        if _combo
+        else trades_df
+    )
     stats = compute_stats(
-        trades_df,
+        trades_df_stats,
         track_concurrent=track_conc,
         date_from=_combo.get("date_from"),
         date_to=_combo.get("date_to"),
     )
+    if "error" not in stats and _combo and not trades_df_stats.empty:
+        from backtest.metrics.robustness import compute_robustness_metrics
+
+        stats.update(
+            compute_robustness_metrics(
+                trades_df_stats,
+                max_dd_pct_vs_peak=stats.get("max_drawdown_pct_vs_peak"),
+                max_dd_pct_vs_initial=stats.get("max_drawdown_pct"),
+                bot_name=cfg.bot_name,
+            )
+        )
     stats.update(engine.get_run_info())
+    if _combo:
+        from backtest.grid.study_mode import apply_wave_isolation_report_stats
+
+        stats = apply_wave_isolation_report_stats(stats, _combo)
+        stats["config"] = dict(_combo)
     print_summary(cfg.bot_name, stats, trades_df)
 
     # WF breakdown (jen pokud jsou WF obchody)
@@ -775,6 +804,11 @@ def _run_single_config(
         test_pozice=test_pozice,
     )
 
+    if _combo.get("_grid_test_pozice") is not None:
+        from backtest.grid.grid_report_io import write_live_match_grid_report
+
+        write_live_match_grid_report(stats, output_dir, args=args)
+
     return stats
 
 
@@ -784,17 +818,33 @@ def _run_single_config(
 
 def run_single_mode(args) -> None:
     """Profile = live_match: spusti jeden config."""
-    configs = resolve_live_match(args.config or "LIVE_BOT_CONFIG")
-    cfg = configs[0]
-    output_dir = next_daily_output_dir(
+    from backtest.profile_resolver import resolve_live_match_pair
+
+    config_name = args.config or "LIVE_BOT_CONFIG"
+    cfg, combo = resolve_live_match_pair(
+        config_name,
+        date_from=args.date_from,
+        date_to=args.date_to,
+        combo_no=1,
+    )
+    output_dir = live_match_output_dir(
         args.output,
         output_symbol_for_config(cfg),
-        run_name_live_match(cfg),
+        config_name=config_name,
+        timeframe_label=cfg.timeframe_label,
+        date_from=args.date_from,
+        date_to=args.date_to,
     )
     print(f"\nVystupni adresar: {output_dir}\n")
     df = _load_data_for_config(cfg, args.csv, args.date_from, args.date_to)
     print(f"Nacteno {len(df)} baru | {df['time'].iloc[0]} -> {df['time'].iloc[-1]}")
-    _run_single_config(cfg, df, str(output_dir), args=args, combo_for_visual=None)
+    _run_single_config(
+        cfg,
+        df,
+        str(output_dir),
+        args=args,
+        combo_for_visual=combo,
+    )
 
 
 def run_compare_mode(args) -> None:

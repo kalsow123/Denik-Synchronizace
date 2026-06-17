@@ -27,7 +27,7 @@ def test_cum_pnl_drawdown():
     assert dd.tolist() == [0, 0, 15_000]
 
 
-def test_find_drawdown_episodes_sums_negative_pnl():
+def test_find_drawdown_episodes_peak_to_trough_with_pnl():
     times = pd.date_range("2024-01-01", periods=5, freq="D")
     y = np.array([0, 100, 50, -20, 80])
     pnl = np.array([0, 100, -50, -70, 100])
@@ -73,8 +73,8 @@ def test_grid_drawdown_overlay_uses_peak_to_trough_depth_only():
     assert episodes[0]["loss_usd"] == 70.0
     assert len(fig.data) == 1
 
-    eps_with_trade_sum = _find_drawdown_episodes(times, equity, pnl_values=pnl, min_loss_usd=1)
-    assert eps_with_trade_sum[0]["loss_usd"] == 90.0
+    eps_with_pnl = _find_drawdown_episodes(times, equity, pnl_values=pnl, min_loss_usd=1)
+    assert eps_with_pnl[0]["loss_usd"] == 70.0
 
 
 def test_grid_drawdown_label_color_threshold():

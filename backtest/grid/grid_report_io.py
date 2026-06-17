@@ -181,6 +181,48 @@ def write_grid_csv_exports(
     return written
 
 
+LIVE_MATCH_GRID_PROFILE: dict = {
+    "prop_firms": {"enabled": False},
+}
+
+
+def write_live_match_grid_report(
+    stats: dict,
+    output_dir: Path | str,
+    *,
+    args: Any | None = None,
+) -> Path | None:
+    """
+    live_match: grid_report.xlsx + CSV (vysledky, summaries, ddi_epizody).
+    Prop-firm listy se neexportuji (enabled=False).
+    """
+    if "error" in stats:
+        return None
+    cfg = stats.get("config") or {}
+    bot_name = str(cfg.get("bot_name") or "live_match")
+    output_dir = Path(output_dir)
+    results = {bot_name: stats}
+
+    sheets, df_report, df_long, _primary = build_grid_workbook_sheets(
+        results,
+        profile=LIVE_MATCH_GRID_PROFILE,
+        args=args,
+    )
+    write_grid_csv_exports(output_dir, sheets, df_report, df_long)
+
+    xlsx_path = output_dir / GRID_REPORT_XLSX
+    if export_grid_workbook(xlsx_path, sheets):
+        parts = ", ".join(sheets.keys())
+        print(f"Grid report: {xlsx_path} ({len(df_report)} radku | listy: {parts})")
+        return xlsx_path
+
+    print(
+        "VAROVANI: grid_report.xlsx — nainstaluj openpyxl. "
+        "CSV zalohy jsou v output slozce."
+    )
+    return None
+
+
 def init_grid_report_workbook(output_dir: Path | str, *, quiet: bool = True) -> Path:
     """Prázdný grid_report.xlsx hned na začátku běhu (nebo CSV záloha)."""
     output_dir = Path(output_dir)

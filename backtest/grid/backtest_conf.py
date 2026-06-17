@@ -161,7 +161,7 @@ ABORT FIB LEVEL (pasionka / hluboký retracement — rozšíření jednoho klí�
     vypnuté; lze např. jen PP (pp_enabled=True, wave_position_enabled=False, ostatní dle potřeby).
   - wave_positions_only (default False) — jen klasické WAVE: vynutí wave_position_enabled=True
     a vypne counter/two-sided, PP, BOS, EXT (+ ext_counter). Backtester i live bot
-    (main.py, live_loop, CONFIG_REGISTRY preset WAVE_ONLY_LIVE). Implicitně True, pokud
+    (main.py, live_loop, LIVE_BOT_CONFIG s wave_positions_only). Implicitně True, pokud
     WAVE on a všechny pomocné moduly off (viz config/position_modes.py).
   - wave_isolation_study (default False) — POUZE backtest/grid (ne live): wave study mód.
     V reportu counter off; engine bezi s plnym counterem → net_pnl_wave_usd = WAVE slice
@@ -225,27 +225,37 @@ PROFILES = {}
 
 # ============== EXAMPLE - TESTING ==============    
 
+
+# ----------- TESTOVACÍ OKNO -------------
+# "date_from": ["2024-05-10"], 
+# "date_to"  : ["2024-11-09"],
+
+# "date_from": ["2024-11-10"], 
+# "date_to"  : ["2025-05-09"],
+
+# "date_from": ["2025-05-10"],
+# "date_to"  : ["2025-11-09"],
+
+# "date_from": ["2025-11-10"], 
+# "date_to"  : ["2026-05-09"],
+
 PROFILES["EXAMPLE"] = {
+    # VARIAC9 — combo_no 473, 266, 300, 810, 257 (2025-05-10 .. 2025-11-09)
     "grid": [
-        {
-# ============== MARKET SETTING ==============
-            "date_from": ["2026-01-01"],
-            "date_to": ["2026-05-10"],
+        {  # combo_no 473
+            "date_from": ["2025-05-10"],
+            "date_to"  : ["2025-11-09"],
             "timeframe": ["M30"],
-
-# ============== TP SETTINGS ==============
             "wave_min_pct": [0.26],
-            "rrr": [2.0], 
-            "tp_mode": ["bos_exit", "rrr_fixed", "wave_target_n", "wave_target_n_g"],
-            "tp_target_wave_index": [4],  # wave_target_n / wave_target_n_g: cislo vlny v trendu pro TP
-            "wave_extension_pct": [0.10],  # wave_target_n / wave_target_n_g: podil velikosti predchozi stejnosmerne vlny
-            "bos_entry_in_rrr_fixed": [True],  # jen tp_mode=rrr_fixed: WAVE_BOS po close-BOS flipu
-            "wave_2_no_tp_enable": [True],
+            "rrr": [2.5],
+            "tp_mode": ["wave_target_n"],
+            "tp_target_wave_index": [4, 6, 8],
+            "wave_extension_pct": [0.1],
+            "bos_entry_in_rrr_fixed": [True],
+            "wave_2_no_tp_enable": [True, False],
             "wave_2_no_tp_max_index": [2],
-
-# ============== MARKET OPTIMALISATION ==============
             "min_opp_bars": [3],
-            "fib_level": [0.5],
+            "fib_level": [0.55],
             "entry_mode": ["market_fallback"],
             "symbol": ["EURUSD"],
             "sl_fib_level": [0.8],
@@ -253,68 +263,358 @@ PROFILES["EXAMPLE"] = {
             "wave_plus": [True],
             "order_expiry_days": [3],
             "ext_order_expiry_days": [7],
-            "pending_cancel_mode": ["number", "trend"], #Trend follower or pending cancel according to dates
-            "pending_cancel_after_days": [7],  # Pending cancel according to dates
-            "wave_max_pct": [1.0],  # When EXT is ON => uselles - wave % protection - does not apply to EXT
-            "max_wave_age_hours": [12], # Duplication protection from night bot restart
-
-# ============== RISK MANAGEMENT ==============
+            "pending_cancel_mode": ["trend"],
+            "pending_cancel_after_days": [7],
+            "wave_max_pct": [1],
+            "max_wave_age_hours": [20],
             "risk_usd": [500.0],
-            "pp_risk_usd": [500.0],
-            "contract_size": [100_000.0],
-            "magic": [100_001],
+            "pp_risk_usd": [500],
+            "contract_size": [100000.0],
+            "magic": [100001],
             "spread": [0.0001],
             "slippage": [0.0],
-            "adx14_change_enabled": [False],  # výpočet normalizovaného signálu; fit: strategy/adx14_change_indicator.py --fit
-            "adx14_equity_gate_enabled": [False],  # blokace nových vstupů při signálu ≥ práh (default 1.3)
-            "pnl_base_tracker_enabled": [False],  # křivka PnL základní; pro restart gate přes BOS confirm
-
-# ============== WAVE & PP ==============
+            "adx14_change_enabled": [False],
+            "adx14_equity_gate_enabled": [False],
+            "pnl_base_tracker_enabled": [False],
             "wave_min_sl": [0.12],
             "wave_position_enabled": [True],
-            "wave_positions_only": [False],  # live + backtest: jen klasické WAVE, ostatní moduly vynuceně off
-            "wave_isolation_study": [False],  # jen backtest wave study: stejné net_pnl_wave_usd jako plná kombinace
-            "wave_counter_two_sided_enabled": [True],  # WAVE_COUNTER + WAVE_TWO_SIDED — set: True / False
+            "wave_positions_only": [True],
+            "wave_isolation_study": [True],
+            "wave_counter_two_sided_enabled": [True],
             "two_sided_entry_min_wave_pct": [0.55],
-            "skip_primary_entry_on_parent_wave_enable": [True],  # preskocit primarni WAVE vstup na two-sided rodici A; jen protipozice na protivln
-            "wf_enabled": [True],  # Wick Fakeout Recovery   
-            "pp_enabled": [True, False], # - set: True / False
+            "skip_primary_entry_on_parent_wave_enable": [True],
+            "wf_enabled": [True],
+            "pp_enabled": [False],
             "pp_sl_pct": [0.21],
-            "pp_disabled_in_ext_context": [True],  # True = neotevírat PP z EXT / in_ext_range vln
-
-# ============== TREND FILTER & BOS ==============
-            "trend_filter_enabled": [True],   # WAVE; PP positions in trend only    
-            "trend_hh_hl_filter_enabled": [True], # Trend definition for positon oppening in - trend only - Both sides after EXT applies 
-            "bos_entry_enable": [True], # WAVE_BOS position enable/disable
-            "wave_size_sl_ladder_base_pct": [0.21],  # WAVE_COUNTER; WAVE_BOS - min SL a následný posun dle veliksoti WAVE a EXT
+            "pp_disabled_in_ext_context": [True],
+            "trend_filter_enabled": [True],
+            "trend_hh_hl_filter_enabled": [True],
+            "bos_entry_enable": [False],
+            "wave_size_sl_ladder_base_pct": [0.21],
             "wave_size_sl_ladder_step_pct": [0.16],
-            "wave_size_sl_ladder_band_size_pct": [0.50],
-
-# ============== EXT ==============
-            "ext_enabled": [True], # wave true/false and all connected to it.
-            "ext_wave_min_pct": [0.76],    
-            "ext_secondary_enabled": [False], # 0,236 position - false 
-            "ext_weekend_gap_relax_factor": [0.76], 
-            "ext_counter_enabled": [True],  # master: EXT counter TIME + BOS (fib 0.35)
+            "wave_size_sl_ladder_band_size_pct": [0.5],
+            "ext_enabled": [True],
+            "ext_wave_min_pct": [0.76],
+            "ext_secondary_enabled": [False],
+            "ext_weekend_gap_relax_factor": [0.76],
+            "ext_counter_enabled": [True],
             "ext_counter_time": ["23:00"],
-            "ext_counter_min_sl_enabled": [True],  # min SL floor u EXT counter; False = jen ext_high/low
-            "ext_counter_min_sl_pct": [0.16],  # min SL od entry v % (EXT counter TIME + BOS)
+            "ext_counter_min_sl_enabled": [True],
+            "ext_counter_min_sl_pct": [0.16],
             "ext_trade_both_sides_in_range": [True],
-            "wave_min_pct_enable": [False], # - set: True / False (Během EXT both-sides okna používá nižší volatilní práh pro detekci WAVE)
-            "ext_post_both_sides_wave_min_pct": [0.13], # - Hodnota sníženého prahu v procentech (např. 0.13 %)
-            "ext_post_both_sides_default_sl_pct": [0.10], # - Hodnota minimálního SL pro volatilní WAVE (např. 0.10 %)
-            "ext_close_trend_positions_on_bos": [True, False], # - set: True / False
-
-# ============== WAVE FILTERING & PROPFIRMS ==============
+            "wave_min_pct_enable": [True],
+            "ext_post_both_sides_wave_min_pct": [0.35],
+            "ext_post_both_sides_default_sl_pct": [0.1],
+            "ext_close_trend_positions_on_bos": [True],
             "wave_allowed_sessions": [None],
             "wave_custom_window": [None],
             "track_concurrent_positions": [True],
             "backtest_position_cap_mode": ["off"],
             "backtest_max_open_positions": [None],
-            "prop_firms_enabled": [True],  # post-processing po gridu (NENI v BotConfig / live bot)
-            "prop_firms_presets": ["FTMO"],  # FTMO | FXIFY | FINTOKEI | all | none | list
+            "prop_firms_enabled": [True],
+            "prop_firms_presets": ["FTMO"],
             "prop_firms_account_size_usd": [100_000],
-            "prop_firms_generate_html": [False],  # True = prop_firm_compliance.html (CLI ma prioritu)
+            "prop_firms_generate_html": [False],
+        },
+
+        {  # combo_no 266
+            "date_from": ["2025-05-10"],
+            "date_to"  : ["2025-11-09"],
+            "timeframe": ["M30"],
+            "wave_min_pct": [0.26],
+            "rrr": [2.5],
+            "tp_mode": ["wave_target_n"],
+            "tp_target_wave_index": [4, 6, 8],
+            "wave_extension_pct": [0.1],
+            "bos_entry_in_rrr_fixed": [True],
+            "wave_2_no_tp_enable": [True, False],
+            "wave_2_no_tp_max_index": [2],
+            "min_opp_bars": [3],
+            "fib_level": [0.55],
+            "entry_mode": ["market_fallback"],
+            "symbol": ["EURUSD"],
+            "sl_fib_level": [0.8],
+            "abort_fib_level": ["shift_sl"],
+            "wave_plus": [True],
+            "order_expiry_days": [3],
+            "ext_order_expiry_days": [7],
+            "pending_cancel_mode": ["trend"],
+            "pending_cancel_after_days": [7],
+            "wave_max_pct": [1],
+            "max_wave_age_hours": [20],
+            "risk_usd": [500.0],
+            "pp_risk_usd": [500],
+            "contract_size": [100000.0],
+            "magic": [100001],
+            "spread": [0.0001],
+            "slippage": [0.0],
+            "adx14_change_enabled": [False],
+            "adx14_equity_gate_enabled": [False],
+            "pnl_base_tracker_enabled": [False],
+            "wave_min_sl": [0.12],
+            "wave_position_enabled": [True],
+            "wave_positions_only": [False],
+            "wave_isolation_study": [False],
+            "wave_counter_two_sided_enabled": [True],
+            "two_sided_entry_min_wave_pct": [0.55],
+            "skip_primary_entry_on_parent_wave_enable": [True],
+            "wf_enabled": [True],
+            "pp_enabled": [True],
+            "pp_sl_pct": [0.21],
+            "pp_disabled_in_ext_context": [True],
+            "trend_filter_enabled": [True],
+            "trend_hh_hl_filter_enabled": [True],
+            "bos_entry_enable": [False],
+            "wave_size_sl_ladder_base_pct": [0.21],
+            "wave_size_sl_ladder_step_pct": [0.16],
+            "wave_size_sl_ladder_band_size_pct": [0.5],
+            "ext_enabled": [True],
+            "ext_wave_min_pct": [0.76],
+            "ext_secondary_enabled": [False],
+            "ext_weekend_gap_relax_factor": [0.76],
+            "ext_counter_enabled": [True],
+            "ext_counter_time": ["23:00"],
+            "ext_counter_min_sl_enabled": [True],
+            "ext_counter_min_sl_pct": [0.16],
+            "ext_trade_both_sides_in_range": [True],
+            "wave_min_pct_enable": [False],
+            "ext_post_both_sides_wave_min_pct": [0.35],
+            "ext_post_both_sides_default_sl_pct": [0.1],
+            "ext_close_trend_positions_on_bos": [True],
+            "wave_allowed_sessions": [None],
+            "wave_custom_window": [None],
+            "track_concurrent_positions": [True],
+            "backtest_position_cap_mode": ["off"],
+            "backtest_max_open_positions": [None],
+            "prop_firms_enabled": [True],
+            "prop_firms_presets": ["FTMO"],
+            "prop_firms_account_size_usd": [100_000],
+            "prop_firms_generate_html": [False],
+        },
+
+        {  # combo_no 300
+            "date_from": ["2025-05-10"],
+            "date_to"  : ["2025-11-09"],
+            "timeframe": ["M30"],
+            "wave_min_pct": [0.26],
+            "rrr": [2.5],
+            "tp_mode": ["wave_target_n"],
+            "tp_target_wave_index": [4, 6, 8],
+            "wave_extension_pct": [0.1],
+            "bos_entry_in_rrr_fixed": [True],
+            "wave_2_no_tp_enable": [True, False],
+            "wave_2_no_tp_max_index": [2],
+            "min_opp_bars": [3],
+            "fib_level": [0.55],
+            "entry_mode": ["market_fallback"],
+            "symbol": ["EURUSD"],
+            "sl_fib_level": [0.8],
+            "abort_fib_level": ["shift_sl"],
+            "wave_plus": [True],
+            "order_expiry_days": [3],
+            "ext_order_expiry_days": [7],
+            "pending_cancel_mode": ["trend"],
+            "pending_cancel_after_days": [7],
+            "wave_max_pct": [1],
+            "max_wave_age_hours": [20],
+            "risk_usd": [500.0],
+            "pp_risk_usd": [500],
+            "contract_size": [100000.0],
+            "magic": [100001],
+            "spread": [0.0001],
+            "slippage": [0.0],
+            "adx14_change_enabled": [False],
+            "adx14_equity_gate_enabled": [False],
+            "pnl_base_tracker_enabled": [False],
+            "wave_min_sl": [0.12],
+            "wave_position_enabled": [True],
+            "wave_positions_only": [False],
+            "wave_isolation_study": [False],
+            "wave_counter_two_sided_enabled": [False],
+            "two_sided_entry_min_wave_pct": [0.55],
+            "skip_primary_entry_on_parent_wave_enable": [True],
+            "wf_enabled": [True],
+            "pp_enabled": [True],
+            "pp_sl_pct": [0.21],
+            "pp_disabled_in_ext_context": [True],
+            "trend_filter_enabled": [True],
+            "trend_hh_hl_filter_enabled": [True],
+            "bos_entry_enable": [False],
+            "wave_size_sl_ladder_base_pct": [0.21],
+            "wave_size_sl_ladder_step_pct": [0.16],
+            "wave_size_sl_ladder_band_size_pct": [0.5],
+            "ext_enabled": [True],
+            "ext_wave_min_pct": [0.76],
+            "ext_secondary_enabled": [False],
+            "ext_weekend_gap_relax_factor": [0.76],
+            "ext_counter_enabled": [False],
+            "ext_counter_time": ["23:00"],
+            "ext_counter_min_sl_enabled": [True],
+            "ext_counter_min_sl_pct": [0.16],
+            "ext_trade_both_sides_in_range": [True],
+            "wave_min_pct_enable": [False],
+            "ext_post_both_sides_wave_min_pct": [0.35],
+            "ext_post_both_sides_default_sl_pct": [0.1],
+            "ext_close_trend_positions_on_bos": [True],
+            "wave_allowed_sessions": [None],
+            "wave_custom_window": [None],
+            "track_concurrent_positions": [True],
+            "backtest_position_cap_mode": ["off"],
+            "backtest_max_open_positions": [None],
+            "prop_firms_enabled": [True],
+            "prop_firms_presets": ["FTMO"],
+            "prop_firms_account_size_usd": [100_000],
+            "prop_firms_generate_html": [False],
+        },
+
+        {  # combo_no 810
+            "date_from": ["2025-05-10"],
+            "date_to"  : ["2025-11-09"],
+            "timeframe": ["M30"],
+            "wave_min_pct": [0.26],
+            "rrr": [2.5],
+            "tp_mode": ["wave_target_n"],
+            "tp_target_wave_index": [4, 6, 8],
+            "wave_extension_pct": [0.1],
+            "bos_entry_in_rrr_fixed": [False],
+            "wave_2_no_tp_enable": [True, False],
+            "wave_2_no_tp_max_index": [2],
+            "min_opp_bars": [3],
+            "fib_level": [0.55],
+            "entry_mode": ["market_fallback"],
+            "symbol": ["EURUSD"],
+            "sl_fib_level": [0.8],
+            "abort_fib_level": ["shift_sl"],
+            "wave_plus": [True],
+            "order_expiry_days": [3],
+            "ext_order_expiry_days": [7],
+            "pending_cancel_mode": ["trend"],
+            "pending_cancel_after_days": [7],
+            "wave_max_pct": [1],
+            "max_wave_age_hours": [20],
+            "risk_usd": [500.0],
+            "pp_risk_usd": [500],
+            "contract_size": [100000.0],
+            "magic": [100001],
+            "spread": [0.0001],
+            "slippage": [0.0],
+            "adx14_change_enabled": [False],
+            "adx14_equity_gate_enabled": [False],
+            "pnl_base_tracker_enabled": [False],
+            "wave_min_sl": [0.12],
+            "wave_position_enabled": [True],
+            "wave_positions_only": [False],
+            "wave_isolation_study": [False],
+            "wave_counter_two_sided_enabled": [False],
+            "two_sided_entry_min_wave_pct": [0.55],
+            "skip_primary_entry_on_parent_wave_enable": [True],
+            "wf_enabled": [True],
+            "pp_enabled": [True],
+            "pp_sl_pct": [0.21],
+            "pp_disabled_in_ext_context": [True],
+            "trend_filter_enabled": [True],
+            "trend_hh_hl_filter_enabled": [True],
+            "bos_entry_enable": [False],
+            "wave_size_sl_ladder_base_pct": [0.21],
+            "wave_size_sl_ladder_step_pct": [0.16],
+            "wave_size_sl_ladder_band_size_pct": [0.5],
+            "ext_enabled": [True],
+            "ext_wave_min_pct": [0.76],
+            "ext_secondary_enabled": [False],
+            "ext_weekend_gap_relax_factor": [0.76],
+            "ext_counter_enabled": [True],
+            "ext_counter_time": ["23:00"],
+            "ext_counter_min_sl_enabled": [True],
+            "ext_counter_min_sl_pct": [0.16],
+            "ext_trade_both_sides_in_range": [True],
+            "wave_min_pct_enable": [False],
+            "ext_post_both_sides_wave_min_pct": [0.35],
+            "ext_post_both_sides_default_sl_pct": [0.1],
+            "ext_close_trend_positions_on_bos": [True],
+            "wave_allowed_sessions": [None],
+            "wave_custom_window": [None],
+            "track_concurrent_positions": [True],
+            "backtest_position_cap_mode": ["off"],
+            "backtest_max_open_positions": [None],
+            "prop_firms_enabled": [True],
+            "prop_firms_presets": ["FTMO"],
+            "prop_firms_account_size_usd": [100_000],
+            "prop_firms_generate_html": [False],
+        },
+
+        {  # combo_no 257
+            "date_from": ["2025-05-10"],
+            "date_to"  : ["2025-11-09"],
+            "timeframe": ["M30"],
+            "wave_min_pct": [0.26],
+            "rrr": [2.5],
+            "tp_mode": ["wave_target_n"],
+            "tp_target_wave_index": [4, 6, 8],
+            "wave_extension_pct": [0.1],
+            "bos_entry_in_rrr_fixed": [True],
+            "wave_2_no_tp_enable": [True, False],
+            "wave_2_no_tp_max_index": [2],
+            "min_opp_bars": [3],
+            "fib_level": [0.55],
+            "entry_mode": ["market_fallback"],
+            "symbol": ["EURUSD"],
+            "sl_fib_level": [0.8],
+            "abort_fib_level": ["shift_sl"],
+            "wave_plus": [True],
+            "order_expiry_days": [3],
+            "ext_order_expiry_days": [7],
+            "pending_cancel_mode": ["trend"],
+            "pending_cancel_after_days": [7],
+            "wave_max_pct": [1],
+            "max_wave_age_hours": [20],
+            "risk_usd": [500.0],
+            "pp_risk_usd": [500],
+            "contract_size": [100000.0],
+            "magic": [100001],
+            "spread": [0.0001],
+            "slippage": [0.0],
+            "adx14_change_enabled": [False],
+            "adx14_equity_gate_enabled": [False],
+            "pnl_base_tracker_enabled": [False],
+            "wave_min_sl": [0.12],
+            "wave_position_enabled": [True],
+            "wave_positions_only": [False],
+            "wave_isolation_study": [False],
+            "wave_counter_two_sided_enabled": [True],
+            "two_sided_entry_min_wave_pct": [0.55],
+            "skip_primary_entry_on_parent_wave_enable": [True],
+            "wf_enabled": [True],
+            "pp_enabled": [True],
+            "pp_sl_pct": [0.21],
+            "pp_disabled_in_ext_context": [True],
+            "trend_filter_enabled": [True],
+            "trend_hh_hl_filter_enabled": [True],
+            "bos_entry_enable": [True],
+            "wave_size_sl_ladder_base_pct": [0.21],
+            "wave_size_sl_ladder_step_pct": [0.16],
+            "wave_size_sl_ladder_band_size_pct": [0.5],
+            "ext_enabled": [True],
+            "ext_wave_min_pct": [0.76],
+            "ext_secondary_enabled": [False],
+            "ext_weekend_gap_relax_factor": [0.76],
+            "ext_counter_enabled": [True],
+            "ext_counter_time": ["23:00"],
+            "ext_counter_min_sl_enabled": [True],
+            "ext_counter_min_sl_pct": [0.16],
+            "ext_trade_both_sides_in_range": [True],
+            "wave_min_pct_enable": [True],
+            "ext_post_both_sides_wave_min_pct": [0.35],
+            "ext_post_both_sides_default_sl_pct": [0.1],
+            "ext_close_trend_positions_on_bos": [True],
+            "wave_allowed_sessions": [None],
+            "wave_custom_window": [None],
+            "track_concurrent_positions": [True],
+            "backtest_position_cap_mode": ["off"],
+            "backtest_max_open_positions": [None],
+            "prop_firms_enabled": [True],
+            "prop_firms_presets": ["FTMO"],
+            "prop_firms_account_size_usd": [100_000],
+            "prop_firms_generate_html": [False],
         },
     ],
 }
@@ -323,8 +623,8 @@ PROFILES["testing"] = {
     "grid": [
         {
 # ============== MARKET SETTING ==============
-            "date_from": ["2025-05-10"],    # "2024-05-10" , "2025-05-10"
-            "date_to":   ["2025-10-10"],    # "2025-10-10" , "2026-06-10"
+            "date_from": ["2024-05-10"],    # "2024-05-10" , "2025-05-10"
+            "date_to":   ["2026-06-10"],    # "2025-10-10" , "2026-06-10"
             "timeframe": ["M30"],
 
 # ============== TP SETTINGS ==============
@@ -333,8 +633,8 @@ PROFILES["testing"] = {
             "tp_mode": ["wave_target_n"], # "bos_exit", "rrr_fixed", "wave_target_n", "wave_target_n_g"
             "tp_target_wave_index": [4],
             "wave_extension_pct": [0.10],
-            "bos_entry_in_rrr_fixed": [True],
-            "wave_2_no_tp_enable": [True],
+            "bos_entry_in_rrr_fixed": [True, False],
+            "wave_2_no_tp_enable": [True, False],
             "wave_2_no_tp_max_index": [2],
 
 # ============== MARKET OPTIMALISATION ==============
@@ -366,30 +666,30 @@ PROFILES["testing"] = {
 # ============== WAVE & PP ==============
             "wave_min_sl": [0.12],
             "wave_position_enabled": [True],
-            "wave_positions_only": [False],  # jen klasické WAVE, ostatní moduly vynuceně off
-            "wave_isolation_study": [False],  # engine plná simulace, report = WAVE slice — never turn off
-            "wave_counter_two_sided_enabled": [True],
+            "wave_positions_only": [False, True],  # jen klasické WAVE, ostatní moduly vynuceně off
+            "wave_isolation_study": [False, True],  # engine plná simulace, report = WAVE slice — never turn off
+            "wave_counter_two_sided_enabled": [True, False],
             "two_sided_entry_min_wave_pct": [0.55],
             "skip_primary_entry_on_parent_wave_enable": [True],
             "wf_enabled": [True],
-            "pp_enabled": [True],
+            "pp_enabled": [True, False],
             "pp_sl_pct": [0.21],
             "pp_disabled_in_ext_context": [True],
 
 # ============== TREND FILTER & BOS ==============
             "trend_filter_enabled": [True],
             "trend_hh_hl_filter_enabled": [True],
-            "bos_entry_enable": [True],
+            "bos_entry_enable": [True, False],
             "wave_size_sl_ladder_base_pct": [0.21],
             "wave_size_sl_ladder_step_pct": [0.16],
             "wave_size_sl_ladder_band_size_pct": [0.50],
 
 # ============== EXT ==============
-            "ext_enabled": [True],
+            "ext_enabled": [True, False],
             "ext_wave_min_pct": [0.76],
             "ext_secondary_enabled": [False],
             "ext_weekend_gap_relax_factor": [0.76],
-            "ext_counter_enabled": [True],
+            "ext_counter_enabled": [True, False],
             "ext_counter_time": ["23:00"],
             "ext_counter_min_sl_enabled": [True],
             "ext_counter_min_sl_pct": [0.16],

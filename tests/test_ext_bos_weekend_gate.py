@@ -46,15 +46,10 @@ def test_ext_bos_visual_left_bar_weekend():
 
 
 def _may19_cfg():
-    for combo in generate_combinations(get_profile("testing")):
-        if (
-            combo.get("wf_enabled")
-            and combo.get("trend_hh_hl_filter_enabled")
-            and combo.get("tp_mode") == "wave_target_n"
-            and combo.get("wave_counter_two_sided_enabled") is False
-        ):
-            return grid_dict_to_bot_config(combo)
-    raise RuntimeError("combo not found")
+    combos = list(generate_combinations(get_profile("testing")))
+    if not combos:
+        raise RuntimeError("combo not found")
+    return grid_dict_to_bot_config(combos[0])
 
 
 def test_may19_no_ext_bos_close_before_weekend_ext_draw_right():

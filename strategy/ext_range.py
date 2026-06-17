@@ -168,6 +168,7 @@ def on_wave_confirmed_in_ext_range(
     tracker: ExtRangeTracker,
     wave: dict,
     cfg: BotConfig,
+    ext_ref: dict | None = None,
 ) -> int:
     """
     Aktualizuje tracker po potvrzeni vlny v EXT range.
@@ -178,6 +179,11 @@ def on_wave_confirmed_in_ext_range(
 
     if not _check_wave_min_pct_and_tag(wave, cfg, in_ext_window=True):
         return 0
+
+    # §1.2(a): HH stejnosměrné vůči EXT extremu ukončí range okamžitě.
+    if ext_ref is not None and ext_post_wave_makes_hh_vs_ref(wave, ext_ref):
+        tracker.active = False
+        return int(wave.get("dir", 0))
 
     wdir = int(wave.get("dir", 0))
     if wdir == 1:
@@ -658,7 +664,9 @@ def reapply_ext_range_tags(
             ext_ref = w
             tag_wave_ext_range(w, in_range=True)
         else:
-            seed_dir = on_wave_confirmed_in_ext_post_trend_seed(seed_tracker, w, cfg, in_ext_window=tracker.active)
+            seed_dir = on_wave_confirmed_in_ext_post_trend_seed(
+                seed_tracker, w, cfg, in_ext_window=tracker.active
+            )
             if seed_dir in (1, -1):
                 tag_wave_ext_post_trend_seed(w, trend_dir=seed_dir)
 
@@ -681,13 +689,20 @@ def reapply_ext_range_tags(
                     )
                 ):
                     tracker.active = False
+                    seed_tracker.active = False
                     ext_ref = None
             if tracker.active:
-                confirmed_dir = on_wave_confirmed_in_ext_range(tracker, w, cfg)
+                confirmed_dir = on_wave_confirmed_in_ext_range(
+                    tracker, w, cfg, ext_ref=ext_ref
+                )
                 if confirmed_dir in (1, -1):
+                    seed_tracker.active = False
                     ext_ref = None
                 else:
                     tag_wave_ext_range(w, in_range=True)
+
+    # 3b) Po wave_sequence: synchronizuj in_ext dle terminatoru (CESTA D / §6.7).
+    apply_in_ext_range_from_sequence_terminators(waves, cfg)
 
     # 4) BOS flipy se SEEDS — pouzity pro vymezeni lock zon (pass 5).
     bos_flip_bars_with_seeds = _collect_trend_bos_flip_bars(
@@ -722,6 +737,74 @@ def effective_wave_min_pct(cfg: BotConfig, in_ext_window: bool) -> float:
         except (ValueError, TypeError):
             pass
     return float(cfg.wave_min_pct)
+
+
+def ext_post_wave_makes_hh_vs_ref(wave: dict, ext_ref: dict) -> bool:
+    """§1.2(a): stejnosměrná vlna s novým extremem oproti parent EXT."""
+    ed = int(ext_ref.get("dir", 0))
+    if ed == 1:
+        w_top, e_top = wave.get("box_top"), ext_ref.get("box_top")
+        if w_top is None or e_top is None:
+            return False
+        return float(w_top) > float(e_top)
+    if ed == -1:
+        w_bot, e_bot = wave.get("box_bottom"), ext_ref.get("box_bottom")
+        if w_bot is None or e_bot is None:
+            return False
+        return float(w_bot) < float(e_bot)
+    return False
+
+
+def _ext_post_range_should_terminate(
+    ext_ref: dict,
+    wave: dict,
+    *,
+    post_same_dir_count: int,
+    post_opposite_count: int,
+) -> bool:
+    """§1.2(a)/(b): konec both-sides režimu (in_ext_range) — bez volání wave_sequence."""
+    parent_dir = int(ext_ref.get("dir", 0))
+    wdir = int(wave.get("dir", 0))
+    if wdir == parent_dir:
+        if ext_post_wave_makes_hh_vs_ref(wave, ext_ref):
+            return True
+        if post_same_dir_count >= 2:
+            return True
+        return False
+    if (parent_dir == 1 and wdir == -1) or (parent_dir == -1 and wdir == 1):
+        return post_opposite_count >= 2
+    return False
+
+
+def apply_in_ext_range_from_sequence_terminators(
+    waves: List[dict],
+    cfg: BotConfig,
+) -> None:
+    """
+    Po `sync_wave_sequence_state`: vynutí in_ext_range=False od vlny s
+    `ext_post_range_terminator` (§6.7 / CESTA D).
+
+    Nepřepisuje in_ext=True — ten nastavuje hlavní smyčka (včetně BOS flip stop).
+    """
+    if not ext_range_enabled(cfg) or not waves:
+        return
+    from strategy.ext_logic import is_ext_wave
+
+    ordered = sorted(
+        waves,
+        key=lambda x: (int(x.get("draw_left", 0)), str(x.get("wave_time", ""))),
+    )
+    terminated = False
+    for w in ordered:
+        if is_ext_wave(w, cfg):
+            terminated = False
+            continue
+        if w.get("ext_post_range_terminator"):
+            terminated = True
+            tag_wave_ext_range(w, in_range=False)
+            continue
+        if terminated:
+            tag_wave_ext_range(w, in_range=False)
 
 
 def check_close_breaks_ext_extreme(

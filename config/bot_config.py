@@ -149,7 +149,7 @@ class BotConfig:
     dynamic_risk_enabled: bool = False
     risk_pct_of_equity: float = 0.5
     bot_name:      str   = "TESTING"
-    startup_bars:        int = 1500   # kolik baru nacist pri startu pro pine-style recovery
+    startup_bars:        int = 1440   # kolik baru nacist z MT5 (~1 mesic na M30: 30*48)
     retry_market_attempts: int = 2
     retry_pending_attempts: int = 3
     retry_backoff_sec: float = 0.35   # time (cislo = sekundy)
@@ -238,22 +238,29 @@ class BotConfig:
 # Tento config ctete `main.py` pri startu live bota.
 # Prepnuti: zmente tp_mode nize, nebo python -m main --config <NAZEV>
 
+# LIVE_BOT_CONFIG — grid EXAMPLE combo_no 2 (2025-11-10 .. 2026-05-09, w2notpFalse).
+# Runtime engine: resolve_grid_engine_config() — plna simulace (counter/EXT ordery).
+# wave_isolation_study=True: report/stats filtr WAVE slice (stejne jako grid combo 2).
+
 LIVE_BOT_CONFIG = BotConfig(
     # ============== MARKET SETTING ==============
-    symbol="EURUSD.x",
+    symbol="EURUSD",  #L
     timeframe=mt5.TIMEFRAME_M30,
     wave_min_pct=0.26,
+    wave_session_filter_enabled=False,
 
     # ============== TP SETTINGS ==============
-    rrr=2.0,
-    tp_mode=TPMode.WAVE_TARGET_N_G,
+    rrr=2.5,
+    tp_mode=TPMode.WAVE_TARGET_N,
     tp_target_wave_index=4,
     wave_extension_pct=0.10,
-    bos_entry_in_rrr_fixed=False,
+    bos_entry_in_rrr_fixed=True,
+    wave_2_no_tp_enable=False,
+    wave_2_no_tp_max_index=2,
 
     # ============== MARKET OPTIMALISATION ==============
     min_opp_bars=3,
-    entry_fib_level=0.5,
+    entry_fib_level=0.55,
     sl_fib_level=0.8,
     abort_fib_level=ABORT_FIB_SHIFT_SL,
     wave_plus=True,
@@ -263,169 +270,115 @@ LIVE_BOT_CONFIG = BotConfig(
     pending_cancel_mode="trend",
     pending_cancel_after_days=7,
     wave_max_pct=1.0,
-    max_wave_age_hours=12,
+    max_wave_age_hours=20,
 
     # ============== RISK MANAGEMENT ==============
     risk_usd=500.0,
     pp_risk_usd=500.0,
-    contract_size=100_000.0,
+    contract_size=100_000.0,  #L backtest; live lot z MT5
     magic=100_001,
 
     # ============== WAVE & PP ==============
     wave_min_sl=0.12,
     wave_position_enabled=True,
+    wave_positions_only=True,
+    wave_isolation_study=True,
     wave_counter_two_sided_enabled=True,
-    two_sided_entry_enabled=True,
+    two_sided_entry_enabled=False,
     two_sided_entry_min_wave_pct=0.55,
-    skip_primary_entry_on_parent_wave_enable=True,  # preskocit primarni WAVE vstup na two-sided rodici A; jen protipozice na protivlni B
+    skip_primary_entry_on_parent_wave_enable=True,
     wf_enabled=True,
-    pp_enabled=True,
+    pp_enabled=False,
     pp_sl_pct=0.21,
     pp_disabled_in_ext_context=True,
 
     # ============== TREND FILTER & BOS ==============
     trend_filter_enabled=True,
     trend_hh_hl_filter_enabled=True,
-    counter_position_enabled=True,
-    bos_entry_enable=True,
+    counter_position_enabled=False,
+    bos_entry_enable=False,
     wave_size_sl_ladder_base_pct=0.21,
     wave_size_sl_ladder_step_pct=0.16,
     wave_size_sl_ladder_band_size_pct=0.50,
 
-    # ============== EXT ==============
+    # ============== EXT (combo 2 — wave_isolation_study; engine bezi, obchody WAVE+counter kontext) ==============
     ext_enabled=True,
     ext_secondary_enabled=False,
     ext_wave_min_pct=0.76,
-    ext_weekend_gap_relax_factor=0.5,
+    ext_weekend_gap_relax_factor=0.76,
     ext_counter_enabled=True,
     ext_counter_time="23:00",
     ext_counter_min_sl_enabled=True,
     ext_counter_min_sl_pct=0.16,
     ext_trade_both_sides_in_range=True,
-    ext_range_protect_pendings_from_bos_cancel=True,
+    ext_range_protect_pendings_from_bos_cancel=True,  #L
+    wave_min_pct_enable=True,
+    ext_post_both_sides_wave_min_pct=0.35,
+    ext_post_both_sides_default_sl_pct=0.10,
     ext_close_trend_positions_on_bos=True,
 
     # ============== OTHERS ==============
-    bot_name="LIVE_EURUSD_M30_v1",
-    dynamic_risk_enabled=False,
-    risk_pct_of_equity=0.5,  # 0.5% z equity na 1 obchod
-    live_position_cap_mode="off",
-    live_max_open_positions=None,
-    equity_target_usd=None,
+    bot_name="LIVE_EURUSD_M30_v1",  #L
+    startup_bars=1440,  #L ~1 mesic zpetne z MT5 (M30: 30*48)
+    dynamic_risk_enabled=False,  #L
+    risk_pct_of_equity=0.5,  #L
+    live_position_cap_mode="off",  #L
+    live_max_open_positions=None,  #L
+    equity_target_usd=None,  #L
+
+    # ============== TIME RESET ==============
+    session_enabled=True,  #L vypnout/zapnout bot podle casu (session_manager + live_loop)
+    session_open_time="23:05",  #L broker time — zacatek denni session
+    session_close_time="21:45",  #L broker time — konec denni session
+    session_pre_close_buffer_min=5,  #L min pred close: snapshot + cancel_all_pendings
+    session_weekdays_only=True,  #L tydenni pauza mezi week_close a week_open
+    session_week_close_weekday=4,  #L 0=Po .. 6=Ne (4=Pá)
+    session_week_close_time="21:45",  #L
+    session_week_open_weekday=6,  #L 0=Po .. 6=Ne (6=Ne)
+    session_week_open_time="23:05",  #L
+    session_close_positions_on_friday=False,  #L pred tydennim close zavrit i pozice
+
+    # ============== ADX 14  & PNL ==============
+    adx14_change_enabled=False,  #L ADX14 normalizer + HTML report (runtime/adx14_live.py)
+    adx14_equity_gate_enabled=False,  #L vypnout nove vstupy pri adx14_signal >= threshold
+    pnl_base_tracker_enabled=False,  #L krivka PnL zakladni; restart gate pres BOS confirm
+    adx14_change_normalizer_json="runtime/adx14_normalizer.json",  #L
+    adx14_change_html_path="results/live_adx14_change.html",  #L
+    adx14_change_threshold=1.3,  #L legacy alias; gate pouziva adx14_disable_threshold
+    adx14_history_bars=5000,  #L bary pro vypocet denniho ADX14
+    adx14_disable_threshold=1.3,  #L vypnuti novych vstupu pri adx14_signal >= tato hodnota
+    adx14_auto_restart_calendar_months=2,  #L auto restart gate po N kalendarnich mesicich
+    adx14_bos_confirm_enabled=True,  #L restart gate po potvrzenem novem high PnL zakladni
+    adx14_bos_confirm_calendar_weeks=2,  #L platí jen pri adx14_bos_confirm_enabled=True
+    adx14_gate_state_path="runtime/adx14_equity_gate_state.json",  #L
+    adx14_gate_jsonl_path="runtime/adx14_equity_gate.jsonl",  #L
+    pnl_base_tracker_risk_usd=500.0,  #L
+    pnl_base_tracker_state_path="runtime/pnl_base_tracker_state.json",  #L
+    pnl_base_tracker_jsonl_path="runtime/pnl_base_tracker.jsonl",  #L
+    pnl_base_tracker_csv_path="runtime/pnl_base_curve.csv",  #L
 )
 
-# Priklad experimentalniho configu pro testovani.
-# Muzete pridat libovolne dalsi a registrovat je v CONFIG_REGISTRY nize.
-#
-# EXAMPLE_EURUSD_M15 — experimentalni preset (symbol/EU50P apod.):
-#   stejne jako LIVE: trend/BOS filtry vypnuty, RRR_FIXED; upravte zde nebo v gridu
-#   pro test bos_exit / wave_extension_pct / trend_filter_enabled=True.
-EXAMPLE_EURUSD_M15 = BotConfig(
-    bot_name="EXAMPLE_EURUSD_M15_v1",
-    magic=100_001,
-    symbol="EURUSD.x",
-    timeframe=mt5.TIMEFRAME_M15,
-    wave_min_pct=0.20,
-    min_opp_bars=4,
-    rrr=1.5,
-    entry_fib_level=0.618,
-    sl_fib_level=0.85,
-    entry_mode=EntryMode.MARKET_FALLBACK,
-    risk_usd=500.0,
-    contract_size=100_000.0,  #Pro forex; pro indic, crypto, comodities 1
-    order_expiry_days=14,
-    ext_order_expiry_days=7,
-    pending_cancel_mode="number",
-    pending_cancel_after_days=14,
-    # --- TREND & BOS (explicitne; zmente pro experiment) ---
-    trend_filter_enabled=False,
-    trend_hh_hl_filter_enabled=False,
-    tp_mode=TPMode.RRR_FIXED,
-    tp_target_wave_index=4,
-    wave_extension_pct=0.20,
-    counter_position_enabled=False,
-    bos_entry_enable=False,
-    # bos_entry_in_rrr_fixed — WAVE_BOS po BOS flipu jen v rrr_fixed; zapni pri tp_mode=RRR_FIXED.
-    bos_entry_in_rrr_fixed=False,
-    # TWO-SIDED ENTRY + PP — defaultne vypnuto
-    two_sided_entry_enabled=False,
-    two_sided_entry_min_wave_pct=0.55,
-    wave_position_enabled=True,  # klasické vlny
-    wave_min_sl=0.12,
-    pp_enabled=False,
-    pp_sl_pct=0.21,
-    pp_risk_usd=500.0,
-    pp_disabled_in_ext_context=True,
-    # Weekend-gap relax pro EXT prah (viz BotConfig).
-    ext_weekend_gap_relax_factor=0.5,
-    ext_secondary_enabled=False,
-    # --- WICK FAKEOUT RECOVERY (WF) ---
-    wf_enabled=True,  # Wick Fakeout Recovery
-)
-
-# Jen klasické WAVE — live preset (apply_wave_positions_only_to_bot_config pri startu).
-WAVE_ONLY_LIVE = BotConfig(
-    bot_name="WAVE_ONLY_LIVE",
-    symbol=LIVE_BOT_CONFIG.symbol,
-    timeframe=LIVE_BOT_CONFIG.timeframe,
-    wave_min_pct=LIVE_BOT_CONFIG.wave_min_pct,
-    min_opp_bars=LIVE_BOT_CONFIG.min_opp_bars,
-    rrr=LIVE_BOT_CONFIG.rrr,
-    entry_fib_level=LIVE_BOT_CONFIG.entry_fib_level,
-    sl_fib_level=LIVE_BOT_CONFIG.sl_fib_level,
-    abort_fib_level=LIVE_BOT_CONFIG.abort_fib_level,
-    wave_plus=LIVE_BOT_CONFIG.wave_plus,
-    entry_mode=LIVE_BOT_CONFIG.entry_mode,
-    risk_usd=LIVE_BOT_CONFIG.risk_usd,
-    contract_size=LIVE_BOT_CONFIG.contract_size,
-    magic=LIVE_BOT_CONFIG.magic,
-    tp_mode=LIVE_BOT_CONFIG.tp_mode,
-    tp_target_wave_index=LIVE_BOT_CONFIG.tp_target_wave_index,
-    wave_extension_pct=LIVE_BOT_CONFIG.wave_extension_pct,
-    trend_filter_enabled=LIVE_BOT_CONFIG.trend_filter_enabled,
-    trend_hh_hl_filter_enabled=LIVE_BOT_CONFIG.trend_hh_hl_filter_enabled,
-    wave_positions_only=True,
-    wave_position_enabled=True,
-    wave_counter_two_sided_enabled=False,
-    counter_position_enabled=False,
-    two_sided_entry_enabled=False,
-    pp_enabled=False,
-    bos_entry_enable=False,
-    bos_entry_in_rrr_fixed=False,
-    ext_enabled=False,
-    ext_counter_enabled=False,
-    ext_secondary_enabled=False,
-    wf_enabled=LIVE_BOT_CONFIG.wf_enabled,
-    wave_min_sl=LIVE_BOT_CONFIG.wave_min_sl,
-    order_expiry_days=LIVE_BOT_CONFIG.order_expiry_days,
-    pending_cancel_mode=LIVE_BOT_CONFIG.pending_cancel_mode,
-)
-
-# Registr vsech configu, dostupny v live i v backtestu pres --config <NAZEV>.
-# TREND & BOS: kazdy zaznam nize ma v tele BotConfig(...) explicitne nastavene
-# trend_filter_enabled / tp_mode / ... (viz komentare u LIVE_BOT_CONFIG a EXAMPLE_EURUSD_M15).
 CONFIG_REGISTRY: dict = {
-    "LIVE_BOT_CONFIG":      LIVE_BOT_CONFIG,
-    "WAVE_ONLY_LIVE":       WAVE_ONLY_LIVE,
-    "EXAMPLE_EURUSD_M15":   EXAMPLE_EURUSD_M15,
+    "LIVE_BOT_CONFIG": LIVE_BOT_CONFIG,
 }
 
 # Zpetna kompatibilita
 
 DEFAULT_CONFIG = LIVE_BOT_CONFIG
- # Volím si z čeho bude bot vycházet
 
-# ------ Live bot s defaultním configem ------
+# ------ Live bot (pracovní adresář: Denik/) ------
+# cd "C:\Users\a2010\Desktop\TRADING\Trading bot\BOT_EDIT\IMPLEMENTACE\Denik"
 # python main.py
 
-# ------ Live bot s jiným configem  ------
-# python main.py --config EXAMPLE_EURUSD_M15
-
-# ------Backtest s defaultním configem ------
-# python -m backtest.run_backtest -- profile live_match
-
-# ------ Backtest s jiným configem ------
-# python -m backtest.run_backtest --profile live_match --config EXAMPLE_EURUSD_M15
+# ------ Backtest s LIVE configem ------
+# z IMPLEMENTACE:
+#   cd "C:\Users\a2010\Desktop\TRADING\Trading bot\BOT_EDIT\IMPLEMENTACE"
+#   python -m backtest.run_backtest --profile live_match --date-from 2025-11-10 --date-to 2026-05-09
+# z Denik (doporučeno):
+#   cd "C:\Users\a2010\Desktop\TRADING\Trading bot\BOT_EDIT\IMPLEMENTACE\Denik"
+#   python -m backtest.run_backtest --profile live_match --date-from 2025-11-10 --date-to 2026-05-09
+# výstup: Denik/results/EURUSD/grid_LIVE_BOT_M30_{date_from}_{date_to}_001/
+#         grid_report.xlsx + CSV + *_trades.xlsx
 
 
 def abort_fib_shift_sl_mode(cfg: BotConfig) -> bool:

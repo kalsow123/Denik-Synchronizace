@@ -130,11 +130,10 @@ def run_single(combo: dict) -> tuple:
         trades = engine.run(df)
         df_t = trades_to_df(trades)
         
-        from config.position_modes import grid_backtest_isolation_study
-        if grid_backtest_isolation_study(combo):
-            if "position_kind" in df_t.columns:
-                df_t = df_t[df_t["position_kind"] == "WAVE"].copy()
-                
+        from backtest.grid.study_mode import filter_trades_df_for_grid_stats
+
+        df_t = filter_trades_df_for_grid_stats(df_t, combo)
+
         stats = compute_stats(
             df_t,
             track_concurrent=track_conc,

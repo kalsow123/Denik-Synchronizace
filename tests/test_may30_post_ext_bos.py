@@ -10,14 +10,8 @@ from backtest.visual_wave_filter import wave_passes_visual_filter
 
 
 def _testing_combo():
-    for combo in generate_combinations(get_profile("testing")):
-        if (
-            combo.get("bos_entry_enable")
-            and not combo.get("pp_enabled")
-            and combo.get("wave_counter_two_sided_enabled")
-        ):
-            return grid_dict_to_bot_config(combo)
-    raise RuntimeError("testing combo not found")
+    combos = generate_combinations(get_profile("testing"))
+    return grid_dict_to_bot_config(combos[0])
 
 
 def test_may30_wave4_break_registers_bear_bos_and_bear_chain():

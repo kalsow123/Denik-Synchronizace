@@ -63,7 +63,13 @@ from strategy.ext_logic import (
     is_ext_counter_trade,
     is_ext_primary_wave_trade,
 )
-from strategy.ext_range import check_close_breaks_ext_extreme, effective_wave_min_pct, check_ext_bos_via_fib_35, ext_scenario_classify
+from strategy.ext_range import (
+    check_close_breaks_ext_extreme,
+    check_ext_bos_via_fib_35,
+    effective_wave_min_pct,
+    ext_post_wave_makes_hh_vs_ref,
+    ext_scenario_classify,
+)
 from strategy.trend_bos import (
     TrendState,
     _maybe_seed_state_from_ext_post_trend,
@@ -695,6 +701,9 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
 
     hh_hl_filter = bool(getattr(cfg, "trend_hh_hl_filter_enabled", False))
 
+    for w in waves:
+        w.pop("ext_post_range_terminator", None)
+
     waves_by_extreme: Dict[int, List[dict]] = {}
     n = len(df)
 
@@ -709,6 +718,9 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
 
     ext_active_wave: Optional[dict] = None
     first_ext_counter_wt: Optional[str] = None
+    # Po EXT: pocitadla vln ve smeru / proti smeru parent EXT (§1.2b).
+    ext_post_same_dir_count: int = 0
+    ext_post_opposite_count: int = 0
     # Smer reverzni vlny (opacny k trend-dir EXT climaxu), ktera ma dostat idx 1.
     # Prezije vycisteni ext_active_wave (Mechanismus A/B), dokud nepride opacna
     # vlna nebo dokud cena neprorazi EXT extrem (pak EXT nebyl climax).
@@ -744,9 +756,79 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
     counter_down: int = 0
     last_same_dir_up_wt: Optional[str] = None
     last_same_dir_down_wt: Optional[str] = None
+    # Po strukturalnim BOS: dalsi 2 trend-dir vlny v novem smeru mohou dostat idx
+    # i bez HH/HL (May 21 BEAR 2,3). Ostatni trend-dir vlny: ghost skip (KROK 4).
+    post_bos_ghost_bypass_remaining: int = 0
     result: Dict[str, WaveSequenceInfo] = {}
     state: TrendState = TrendState()
+
+    def _reset_ext_post_counters() -> None:
+        nonlocal ext_post_same_dir_count, ext_post_opposite_count
+        ext_post_same_dir_count = 0
+        ext_post_opposite_count = 0
+
+    def _start_ext_window(ext_wave: dict) -> None:
+        nonlocal ext_active_wave, first_ext_counter_wt
+        nonlocal ext1_counter_idx, last_ext1_counter_wt
+        ext_active_wave = ext_wave
+        first_ext_counter_wt = None
+        ext1_counter_idx = 0
+        last_ext1_counter_wt = None
+        _reset_ext_post_counters()
+
+    def _terminate_ext_post_window() -> None:
+        nonlocal ext_active_wave, first_ext_counter_wt
+        nonlocal ext1_count_window, ext1_protect_window
+        nonlocal ext_climax_reversal_dir, climax_dir, climax_idx, climax_extreme
+        nonlocal trend_established_by_ext
+        ext_active_wave = None
+        first_ext_counter_wt = None
+        _reset_ext_post_counters()
+        ext1_count_window = False
+        ext1_protect_window = False
+        ext_climax_reversal_dir = None
+        climax_dir = climax_idx = climax_extreme = None
+        trend_established_by_ext = False
     
+    def _wave_counter_to_parent_ext(wave_dir: int) -> bool:
+        if ext_active_wave is None:
+            return False
+        parent = int(ext_active_wave.get("dir", 0))
+        return (parent == 1 and wave_dir == -1) or (parent == -1 and wave_dir == 1)
+
+    def _handle_post_ext_opposite_wave(
+        w: dict, wt: str, wdir: int, *, from_is_ext: bool = False
+    ) -> bool:
+        """
+        KROK 3.1: protisměrná vlna vůči parent EXT (both-sides okno).
+
+        Musí běžet i pro is_ext=True — jinak scénář C (_prev_same_dir_idx+1)
+        omylem přiřadí idx 2+ místo 1. Protisměrná idx nezasahuje do
+        counter_up/down ani last_same_dir_* (hlavní řada EXT/WAVE).
+        """
+        nonlocal ext_post_opposite_count, ext1_counter_idx, last_ext1_counter_wt
+        if not _wave_counter_to_parent_ext(wdir):
+            return False
+        if ext1_count_window and not from_is_ext:
+            parent_wt = str(ext_active_wave["wave_time"])
+            parent_info = result.get(parent_wt)
+            parent_is_bos = bool(parent_info and parent_info.is_bos_wave)
+            if ext_post_same_dir_count == 0 and not parent_is_bos:
+                # CESTA D: mezilehlý protisměr (ne is_ext) před W2 → bez idx
+                result[wt] = WaveSequenceInfo(None, None)
+                return True
+            ext1_counter_idx += 1
+            result[wt] = WaveSequenceInfo(ext1_counter_idx, last_ext1_counter_wt)
+            last_ext1_counter_wt = wt
+            return True
+        ext_post_opposite_count += 1
+        opp_idx = ext_post_opposite_count
+        result[wt] = WaveSequenceInfo(opp_idx, None, is_bos_wave=False)
+        if ext1_count_window:
+            ext1_counter_idx += 1
+            last_ext1_counter_wt = wt
+        return True
+
     closes = df["close"].astype(float).to_numpy()
 
     for i in range(n):
@@ -756,26 +838,13 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
         mech_b_fired = False
         if ext_active_wave is not None:
             if check_close_breaks_ext_extreme(bar_close, ext_active_wave):
-                # Mechanismus A: konec both-sides okna (cena prorazila EXT extrem =
-                # trend potvrzen). Ocekavani reverzni vlny (ext_climax_reversal_dir) 
-                # NEcistime — intrabar prurazeni bez nove same-dir VLNY climax neruší.
-                # UZIV. POZADAVEK: ext1_count_window se nesmi predcasne vypnout Mech A,
-                # aby se protismerne vlny mohly dopocitat az do 4 (TP wave n).
-                ext_active_wave = None
-                first_ext_counter_wt = None
-                ext1_count_window = False
-                ext1_protect_window = False
+                # Mechanismus A: close za extremem EXT nesmi ukoncit both-sides
+                # okno — konec EXT jen §1.2(a)/(b) na potvrzené vlně (viz txt §1.2).
+                pass
             elif check_ext_bos_via_fib_35(bar_close, ext_active_wave):
-                # Mechanismus B = EXT BOS (fib-0.35). Uziv. pozadavek:
-                # "BOS EXT nesmi menit trend ani pocitani vln" — EXT BOS jen
-                # UKONCI both-sides okno. NEpreklapi state.direction, NEnastavi
-                # is_bos_wave_pending a NEnuluje countery. Pozice zavira engine
-                # (`_close_ext_trend_positions`, mimo EXT-1). Trend se otoci az
-                # klasickym strukturalnim BOS (Mech C / wave BOS) nebo 2-vln
-                # seedem po EXT. Drive zde byl flip jen pro ne-EXT-1 vetev — ten
-                # je odstranen, obe vetve se chovaji stejne (jen ukonci okno).
+                # Mechanismus B = EXT BOS (fib-0.35). Obchodní vrstva only (§1.5):
+                # NEukončuje EXT režim — ext_active_wave zůstává aktivní.
                 trend_established_by_ext = False
-                ext_active_wave = None
                 first_ext_counter_wt = None
                 mech_b_fired = True
 
@@ -798,10 +867,9 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                         counter_up = 0
                         counter_down = 0
                         ext1_protect_window = False
-                        if ext_active_wave is None and ext1_count_window:
-                            ext1_count_window, ext1_counter_idx, last_ext1_counter_wt = (
-                                _reset_ext1_count_state()
-                            )
+                        ext1_count_window, ext1_counter_idx, last_ext1_counter_wt = (
+                            _reset_ext1_count_state()
+                        )
                         # Mirror enginu (`_bos_close_flip_with_forgive` vraci cerstvy
                         # TrendState): po flipu vynuluj OBA swing levely. Jinak by
                         # invertovane levely (lub > ldt) zpusobily oscilaci trendu
@@ -817,13 +885,18 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                         state.direction = "bull"
                         state.is_bos_wave_pending = True
                         ext_climax_reversal_dir = None
-                        counter_up = 0
                         counter_down = 0
+                        # Zachovej UP radu po EXT (UP 1,2). Pri flipu z bear W3 resetuj.
+                        if ext1_count_window and ext1_counter_idx >= 1:
+                            counter_up = max(int(counter_up or 0), ext1_counter_idx)
+                        elif int(counter_up or 0) >= 2:
+                            pass
+                        else:
+                            counter_up = 0
                         ext1_protect_window = False
-                        if ext_active_wave is None and ext1_count_window:
-                            ext1_count_window, ext1_counter_idx, last_ext1_counter_wt = (
-                                _reset_ext1_count_state()
-                            )
+                        ext1_count_window, ext1_counter_idx, last_ext1_counter_wt = (
+                            _reset_ext1_count_state()
+                        )
                         state.last_up_box_bottom = None
                         state.last_down_box_top = None
 
@@ -839,6 +912,8 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                 result[wt_claim] = WaveSequenceInfo(
                     new_idx, prev_wt, is_bos_wave=new_idx == 1
                 )
+                if new_idx == 1:
+                    post_bos_ghost_bypass_remaining = 2
                 if wdir_claim == 1:
                     counter_up = new_idx
                     last_same_dir_up_wt = wt_claim
@@ -906,10 +981,18 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     ext_climax_reversal_dir is not None
                     and wdir == ext_climax_reversal_dir
                 )
+                # POST-EXT okno: protisměrná vlna vůči parent EXT — HH/HL neblokuje idx.
+                ext_region_counter = False
+                if ext_active_wave is not None:
+                    ext_pd = int(ext_active_wave.get("dir", 0))
+                    ext_region_counter = (
+                        (ext_pd == 1 and wdir == -1) or (ext_pd == -1 and wdir == 1)
+                    )
                 if (
                     state.direction != "neutral"
                     and not wave_is_trend_dir
                     and not is_reversal
+                    and not ext_region_counter
                 ):
                     result[wt] = WaveSequenceInfo(None, None)
                     continue
@@ -940,6 +1023,7 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     result[wt] = WaveSequenceInfo(
                         new_idx, prev_wt, is_bos_wave=True
                     )
+                    post_bos_ghost_bypass_remaining = 2
                     state.is_bos_wave_pending = False
                     ext_climax_reversal_dir = None
                     climax_dir = climax_idx = climax_extreme = None
@@ -947,8 +1031,7 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     if w.get("is_ext"):
                         ext1_count_window = True
                         ext1_protect_window = True
-                        ext_active_wave = w
-                        first_ext_counter_wt = None
+                        _start_ext_window(w)
                         ext1_counter_idx = 0
                         last_ext1_counter_wt = None
                     maybe_update_trend_state_with_wave(state, w, cfg)
@@ -957,15 +1040,128 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     result[wt] = WaveSequenceInfo(None, None)
                     continue
 
+            # Protisměrná is_ext po stejnosměrné noze parent EXT (EXT2→EXT DOWN).
+            if (
+                is_ext
+                and ext_active_wave is not None
+                and _wave_counter_to_parent_ext(wdir)
+                and ext_post_same_dir_count >= 1
+            ):
+                if _handle_post_ext_opposite_wave(w, wt, wdir, from_is_ext=True):
+                    continue
+
             # KROK 2: EXT vlna detekce
             if w.get("is_ext"):
                 wave_dir_matches_flip = (
                     (state.direction == "bull" and wdir == 1)
                     or (state.direction == "bear" and wdir == -1)
                 )
+                # WAVE_BOS po ukončení EXT (§1.4): close prorazí swing ukončující vlny
+                # na stejném baru — Mech C se nespustí, pokud je na baru i EXT potvrzení.
+                wave_bos_after_ext = False
+                if ext_active_wave is None:
+                    if (
+                        wdir == 1
+                        and state.last_down_box_top is not None
+                        and bar_close > float(state.last_down_box_top)
+                    ):
+                        wave_bos_after_ext = True
+                    elif (
+                        wdir == -1
+                        and state.last_up_box_bottom is not None
+                        and bar_close < float(state.last_up_box_bottom)
+                    ):
+                        wave_bos_after_ext = True
+                if wave_bos_after_ext:
+                    state.is_bos_wave_pending = True
+
+                def _prev_same_dir_idx() -> int:
+                    """Nejvyssi idx v tomto smeru z counteru / ext1 / posledni vlny."""
+                    best = 0
+                    if wdir == 1:
+                        best = max(best, int(counter_up or 0))
+                        if ext1_count_window or ext1_counter_idx > 0:
+                            best = max(best, int(ext1_counter_idx or 0))
+                        # Po BOS flip pending je last_same_dir ze stareho trendu — ignoruj.
+                        if not state.is_bos_wave_pending:
+                            if last_same_dir_up_wt and last_same_dir_up_wt in result:
+                                pi = result[last_same_dir_up_wt].index_in_trend
+                                if pi is not None:
+                                    best = max(best, int(pi))
+                    else:
+                        best = max(best, int(counter_down or 0))
+                        if ext1_count_window or ext1_counter_idx > 0:
+                            best = max(best, int(ext1_counter_idx or 0))
+                        if not state.is_bos_wave_pending:
+                            if last_same_dir_down_wt and last_same_dir_down_wt in result:
+                                pi = result[last_same_dir_down_wt].index_in_trend
+                                if pi is not None:
+                                    best = max(best, int(pi))
+                    return best
+
+                def _next_scenario_c_idx() -> int:
+                    """EXT-2+: navazuj na posledni stejnosmernou vlnu pred protisměrem."""
+                    best = 0
+                    blocked_after_opposite = False
+                    cur_left = int(w.get("draw_left", 0))
+                    prior = sorted(
+                        [
+                            x
+                            for x in waves
+                            if str(x["wave_time"]) != wt
+                            and (
+                                int(x.get("draw_left", 0)) < cur_left
+                                or (
+                                    int(x.get("draw_left", 0)) == cur_left
+                                    and str(x.get("wave_time", "")) < wt
+                                )
+                            )
+                        ],
+                        key=lambda x: (
+                            int(x.get("draw_left", 0)),
+                            str(x.get("wave_time", "")),
+                        ),
+                    )
+                    for pw in prior:
+                        pwt = str(pw["wave_time"])
+                        pinfo = result.get(pwt)
+                        if not pinfo or pinfo.index_in_trend is None:
+                            continue
+                        pdir = int(pw.get("dir", 0))
+                        pi = int(pinfo.index_in_trend)
+                        if pdir == wdir:
+                            if pw.get("is_ext"):
+                                best = max(best, pi)
+                                blocked_after_opposite = False
+                            elif not blocked_after_opposite:
+                                best = max(best, pi)
+                        elif pdir == -wdir:
+                            blocked_after_opposite = True
+                    return best + 1
+
+                def _ext_continues_trend_dir_counter() -> bool:
+                    """EXT ve smeru vlny a idx rada tohoto smeru uz bezi — navazuj, neresetuj."""
+                    if wdir == 1:
+                        if counter_up >= 1 or (
+                            ext1_count_window and ext1_counter_idx >= 1
+                        ):
+                            return True
+                    elif wdir == -1:
+                        if counter_down >= 1 or (
+                            ext1_count_window and ext1_counter_idx >= 1
+                        ):
+                            return True
+                    if state.is_bos_wave_pending:
+                        return False
+                    return _prev_same_dir_idx() >= 1
+
+                ext_continues_trend = _ext_continues_trend_dir_counter()
+
                 if state.is_bos_wave_pending:
-                    if wave_dir_matches_flip and (
-                        ext1_count_window or ext1_counter_idx > 0
+                    if (
+                        wave_dir_matches_flip
+                        and ext_active_wave is not None
+                        and (ext1_count_window or ext1_counter_idx > 0)
                     ):
                         # Mech C behem both-sides EXT-1 okna: EXT neni BOS seed.
                         state.is_bos_wave_pending = False
@@ -978,12 +1174,14 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     "last_down_box_top": state.last_down_box_top,
                 }
                 scenario = ext_scenario_classify(w, state, bar_close, swing_levels)
-                if state.is_bos_wave_pending:
+                if (state.is_bos_wave_pending or wave_bos_after_ext) and not ext_continues_trend:
                     scenario = "A"
+                elif state.is_bos_wave_pending and ext_continues_trend:
+                    state.is_bos_wave_pending = False
             
-                if scenario == "A":
+                if scenario == "A" and not ext_continues_trend:
                     # EXT je BOS vlna
-                    forced_bos = state.is_bos_wave_pending
+                    forced_bos = state.is_bos_wave_pending or wave_bos_after_ext
                     state.direction = "bear" if wdir == -1 else "bull"
                     state.last_up_box_bottom = None
                     state.last_down_box_top = None
@@ -1006,10 +1204,9 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     result[wt] = WaveSequenceInfo(
                         new_idx,
                         prev_wt,
-                        is_bos_wave=new_idx == 1,
+                        is_bos_wave=bool(forced_bos),
                     )
-                    ext_active_wave = w
-                    first_ext_counter_wt = None
+                    _start_ext_window(w)
                     ext_climax_reversal_dir = None
                     climax_dir = climax_idx = climax_extreme = None
                     state.is_bos_wave_pending = False
@@ -1046,10 +1243,9 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                         counter_up = 0
                         last_same_dir_up_wt = None
                     result[wt] = WaveSequenceInfo(
-                        new_idx, prev_wt, is_bos_wave=new_idx == 1
+                        new_idx, prev_wt, is_bos_wave=bool(forced_bos)
                     )
-                    ext_active_wave = w
-                    first_ext_counter_wt = None
+                    _start_ext_window(w)
                     ext_climax_reversal_dir = None
                     climax_dir = climax_idx = climax_extreme = None
                     state.is_bos_wave_pending = False
@@ -1069,25 +1265,47 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     trend_established_by_ext = False
                     ext1_count_window = False
                     ext1_protect_window = False
+                    ext1_counter_idx = 0
+                    last_ext1_counter_wt = None
+                    new_idx = _next_scenario_c_idx()
                     if wdir == 1:
-                        counter_up += 1
-                        result[wt] = WaveSequenceInfo(counter_up, last_same_dir_up_wt)
+                        counter_up = new_idx
+                        result[wt] = WaveSequenceInfo(new_idx, last_same_dir_up_wt)
                         last_same_dir_up_wt = wt
                     else:
-                        counter_down += 1
-                        result[wt] = WaveSequenceInfo(counter_down, last_same_dir_down_wt)
+                        counter_down = new_idx
+                        result[wt] = WaveSequenceInfo(new_idx, last_same_dir_down_wt)
                         last_same_dir_down_wt = wt
-                    ext_active_wave = w
-                    first_ext_counter_wt = None
+                    _start_ext_window(w)
                     ext_climax_reversal_dir = -wdir
-                    # Climax-continuation watch: zapamatuj smer, idx a extrem
-                    # EXT climaxu. Stejnosmerna vlna s novym extremem pak dostane
-                    # climax_idx+1 (pokracovani), i kdyz mezitim bounce flipnul trend.
                     climax_dir = wdir
-                    climax_idx = counter_up if wdir == 1 else counter_down
+                    climax_idx = new_idx
                     climax_extreme = (
                         float(w.get("box_top")) if wdir == 1 else float(w.get("box_bottom"))
                     )
+                    maybe_update_trend_state_with_wave(state, w, cfg)
+                    continue
+
+                elif scenario == "A" and ext_continues_trend:
+                    # May 30: EXT ve smeru jiz bezici rady (napr. UP 1,2 -> EXT UP = 3).
+                    new_idx = _prev_same_dir_idx() + 1
+                    if wdir == 1:
+                        counter_up = new_idx
+                        result[wt] = WaveSequenceInfo(new_idx, last_same_dir_up_wt)
+                        last_same_dir_up_wt = wt
+                    else:
+                        counter_down = new_idx
+                        result[wt] = WaveSequenceInfo(new_idx, last_same_dir_down_wt)
+                        last_same_dir_down_wt = wt
+                    _start_ext_window(w)
+                    ext_climax_reversal_dir = None
+                    climax_dir = climax_idx = climax_extreme = None
+                    state.is_bos_wave_pending = False
+                    trend_established_by_ext = False
+                    ext1_count_window = False
+                    ext1_protect_window = False
+                    ext1_counter_idx = 0
+                    last_ext1_counter_wt = None
                     maybe_update_trend_state_with_wave(state, w, cfg)
                     continue
             
@@ -1101,8 +1319,7 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                         counter_down = 1
                         last_same_dir_down_wt = wt
                     result[wt] = WaveSequenceInfo(1, None)
-                    ext_active_wave = w
-                    first_ext_counter_wt = None
+                    _start_ext_window(w)
                     ext_climax_reversal_dir = None
                     climax_dir = climax_idx = climax_extreme = None
                     trend_established_by_ext = True
@@ -1122,6 +1339,7 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                 climax_dir is not None
                 and wdir == climax_dir
                 and climax_extreme is not None
+                and ext_active_wave is None
             ):
                 if _ghost_skip_wave(w, cfg, hh_hl_filter, result, wt):
                     continue
@@ -1154,6 +1372,7 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     trend_established_by_ext = False
                     ext1_count_window = False
                     ext1_protect_window = False
+                    maybe_update_trend_state_with_wave(state, w, cfg)
                     continue
 
             # Klasický BOS check
@@ -1164,8 +1383,7 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
             elif state.direction == "bear" and wdir == 1 and state.last_down_box_top is not None:
                 if bar_close > state.last_down_box_top:
                     is_bos_wave = True
-            
-        
+
             # Forgive PRVNI klasicky BOS po EXT-1: vlna NEotaci trend (spotrebuje
             # one-shot), propadne do KROK 3/4 jako counter — tam dostane paralelni
             # index z counting-okna (ext1_count_window). Dalsi BOS uz flipne.
@@ -1208,54 +1426,28 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                 ext1_protect_window = False
                 ext1_counter_idx = 0
                 last_ext1_counter_wt = None
+                post_bos_ghost_bypass_remaining = 2
                 maybe_update_trend_state_with_wave(state, w, cfg)
                 continue
 
-            # Reverzni vlna po trend-dir EXT
-            # idx 1 a otoci trend i bez prurazu struktury. Prezila vycisteni
-            # ext_active_wave (Mechanismus A/B) — dokud cena neprorazila EXT extrem.
-            if ext_climax_reversal_dir is not None and wdir == ext_climax_reversal_dir:
-                wave_is_counter = (
-                    (state.direction == "bull" and wdir == -1)
-                    or (state.direction == "bear" and wdir == 1)
-                )
-                if wave_is_counter:
-                    state.direction = "bear" if wdir == -1 else "bull"
-                    state.last_up_box_bottom = None
-                    state.last_down_box_top = None
-                    if wdir == 1:
-                        counter_up = 1
-                        last_same_dir_up_wt = wt
-                        counter_down = 0
-                        last_same_dir_down_wt = None
-                    else:
-                        counter_down = 1
-                        last_same_dir_down_wt = wt
-                        counter_up = 0
-                        last_same_dir_up_wt = None
-                    result[wt] = WaveSequenceInfo(1, None, is_bos_wave=True)
-                    ext_active_wave = None
-                    first_ext_counter_wt = None
-                    ext_climax_reversal_dir = None
-                    state.is_bos_wave_pending = False
-                    trend_established_by_ext = bool(w.get("is_ext"))
-                    ext1_count_window = bool(w.get("is_ext"))
-                    if w.get("is_ext"):
-                        ext1_counter_idx = 0
-                        last_ext1_counter_wt = None
-                    maybe_update_trend_state_with_wave(state, w, cfg)
-                    continue
-        
             # KROK 3: Vlna PO EXT (ext_active_wave aktivní)
             if ext_active_wave is not None:
-                # 3.1: Counter vlna po EXT
+                ext_parent_dir = int(ext_active_wave.get("dir", 0))
+                wave_is_counter_to_ext = (
+                    (ext_parent_dir == 1 and wdir == -1)
+                    or (ext_parent_dir == -1 and wdir == 1)
+                )
+                # 3.1: Protisměrná vlna vůči parent EXT (both-sides okno)
+                if wave_is_counter_to_ext:
+                    _handle_post_ext_opposite_wave(w, wt, wdir)
+                    continue
+
+                # 3.1b: Counter vůči aktuálnímu trendu (paralelní EXT-1 okno)
                 wave_is_counter = (
                     (state.direction == "bull" and wdir == -1)
                     or (state.direction == "bear" and wdir == 1)
                 )
                 if wave_is_counter:
-                    # EXT-1 okno: protismerne vlny se pocitaji jako nezavisla
-                    # sekvence 1,2,3,4 (jen vykreslene — ghost hhX vlny vypadnou).
                     parallel_ext1_counting = ext1_count_window or ext1_counter_idx > 0
                     if parallel_ext1_counting:
                         if ext1_count_window and _ghost_skip_wave(
@@ -1263,29 +1455,53 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                         ):
                             continue
                         ext1_counter_idx += 1
-                        result[wt] = WaveSequenceInfo(ext1_counter_idx, last_ext1_counter_wt)
+                        result[wt] = WaveSequenceInfo(
+                            ext1_counter_idx, last_ext1_counter_wt
+                        )
                         last_ext1_counter_wt = wt
                         continue
-                    # Counter vlna po EXT, ktera trend zalozila/flipnula (scenar
-                    # A/B/D) = standardni counter (None). Reverzni vlnu po
-                    # trend-dir EXT (scenar C) resi ext_climax_reversal_dir vyse.
                     result[wt] = WaveSequenceInfo(None, None)
                     continue
-            
-                # 3.2: Trend-dir vlna po EXT (3.2.a nebo 3.2.b). Trend pokracuje
-                # same-dir => EXT nebyl climax, zrus ocekavani reverzni vlny.
+
+                # 3.2: Stejnosměrná vlna vůči parent EXT — trend pokračuje
                 ext_climax_reversal_dir = None
-                if _ghost_skip_wave(w, cfg, hh_hl_filter, result, wt):
-                    continue
                 if wdir == 1:
                     counter_up += 1
-                    result[wt] = WaveSequenceInfo(counter_up, last_same_dir_up_wt)
+                    new_idx = counter_up
+                    prev_wt = last_same_dir_up_wt
                     last_same_dir_up_wt = wt
                 else:
                     counter_down += 1
-                    result[wt] = WaveSequenceInfo(counter_down, last_same_dir_down_wt)
+                    new_idx = counter_down
+                    prev_wt = last_same_dir_down_wt
                     last_same_dir_down_wt = wt
+                result[wt] = WaveSequenceInfo(new_idx, prev_wt)
+                parent_wt = str(ext_active_wave["wave_time"])
+                parent_info = result.get(parent_wt)
+                parent_idx = (
+                    int(parent_info.index_in_trend)
+                    if parent_info and parent_info.index_in_trend is not None
+                    else None
+                )
+                ext_post_same_dir_count += 1
+                makes_hh = ext_post_wave_makes_hh_vs_ref(w, ext_active_wave)
+                terminate = ext_post_same_dir_count >= 2
+                if makes_hh:
+                    terminate = True
+                if (
+                    not terminate
+                    and ext_post_same_dir_count >= 1
+                    and parent_idx == 1
+                    and new_idx == 2
+                    and ext_post_opposite_count == 0
+                    and ext1_counter_idx == 0
+                ):
+                    terminate = True
+                if terminate:
+                    w["ext_post_range_terminator"] = True
                 maybe_update_trend_state_with_wave(state, w, cfg)
+                if terminate:
+                    _terminate_ext_post_window()
                 continue
         
             # KROK 4: Vlna mimo EXT (ext_active_wave is None)
@@ -1321,7 +1537,10 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                 # potvrzena, konec climax-continuation watch.
                 if climax_dir is not None and wdir == -climax_dir:
                     climax_dir = climax_idx = climax_extreme = None
-                if _ghost_skip_wave(w, cfg, hh_hl_filter, result, wt):
+                bypass_ghost = post_bos_ghost_bypass_remaining > 0
+                if not bypass_ghost and _ghost_skip_wave(
+                    w, cfg, hh_hl_filter, result, wt
+                ):
                     continue
                 if wdir == 1:
                     counter_up += 1
@@ -1331,6 +1550,8 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
                     counter_down += 1
                     result[wt] = WaveSequenceInfo(counter_down, last_same_dir_down_wt)
                     last_same_dir_down_wt = wt
+                if bypass_ghost:
+                    post_bos_ghost_bypass_remaining -= 1
                 if state.is_bos_wave_pending:
                     state.is_bos_wave_pending = False
                 maybe_update_trend_state_with_wave(state, w, cfg)
@@ -1447,12 +1668,12 @@ def compute_ext1_protection_bars(df: pd.DataFrame,
             ext1_start_bar = None
 
         if w_is_ext and w_idx == 1:
-            if current_trend_dir is None:
-                current_trend_dir = w_dir
-            if w_dir == current_trend_dir:
-                # Novy trend po BOS flipu: ochrana az od baru PO flip/EXT1 baru.
-                start_bar = w_bar + 1 if flip_wave else w_bar
-                ext1_start_bar = start_bar if start_bar < n else None
+            # EXT 1 vzdy zahaji ochranu ve smeru vlny (do prvni trend-dir vlny idx>=2).
+            if ext1_start_bar is not None and current_trend_dir is not None:
+                _mark_protection_window(ext1_start_bar, w_bar, current_trend_dir)
+            current_trend_dir = w_dir
+            start_bar = w_bar + 1 if flip_wave else w_bar
+            ext1_start_bar = start_bar if start_bar < n else None
 
         if ext1_start_bar is not None and current_trend_dir is not None and w_dir == current_trend_dir:
             if w_idx is not None and int(w_idx) >= protection_end_min_idx:

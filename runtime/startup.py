@@ -10,6 +10,7 @@ from core.signal_keys import get_signal_key
 from core.trading_days import is_older_than_business_days
 from infra.market_data import get_bars
 from infra.orders import send_startup_pending_only
+from infra.pending_snapshot import restore_session_pending_snapshot
 from infra.state_sync import get_active_wave_times, get_position_wave_times
 from strategy.filters import is_wave_in_allowed_session, is_wave_too_large
 from strategy.pine_recovery import simulate_pine_pending_state
@@ -25,7 +26,7 @@ log = logging.getLogger(__name__)
 def restore_pine_style_pending_orders(cfg: BotConfig) -> Set[str]:
     """
     Startup recovery (TREND-FOLLOW LIMIT strategie):
-      1) Nacte STARTUP_BARS baru historie.
+      1) Nacte STARTUP_BARS baru historie z MT5.
       2) Pres simulate_pine_pending_state simuluje, jake setupy by k poslednimu
          baru mely zit jako PENDING LIMIT (cena se jeste nedotkla entry)
          nebo jako otevrene obchody (cena dosahla entry, jeste nezavreno SL/TP).
@@ -99,6 +100,18 @@ def restore_pine_style_pending_orders(cfg: BotConfig) -> Set[str]:
         )
 
     return recovered_signal_keys
+
+
+def restore_all_pending_orders(cfg: BotConfig) -> Set[str]:
+    """
+    Startup / session wake-up:
+      1) Obnovi vsechny pendingy ze session snapshotu (CNTR/PP/EXT/WAVE/...).
+      2) Pine recovery doplni chybejici WAVE LIMIT (cold start bez snapshotu).
+    """
+    snap_n = restore_session_pending_snapshot(cfg)
+    if snap_n:
+        log.info("STARTUP RECOVERY: ze session snapshotu obnoveno %s pending orderu", snap_n)
+    return restore_pine_style_pending_orders(cfg)
 
 
 def block_historical_waves(cfg: BotConfig, sent_signals: Set[str]) -> Set[str]:

@@ -9,7 +9,7 @@ import argparse
 from datetime import datetime
 
 from config.bot_config import CONFIG_REGISTRY, LIVE_BOT_CONFIG
-from config.position_modes import apply_wave_positions_only_to_bot_config
+from config.position_modes import resolve_grid_engine_config
 from core.logging_utils import (
     BOT_INSTANCE_ID,
     log_event,
@@ -20,7 +20,7 @@ from infra.mt5_client import connect, shutdown
 from infra.session_manager import is_session_enabled, is_in_session, get_broker_now
 from runtime.instance_lock import LiveInstanceAlreadyRunning, ensure_single_live_instance
 from runtime.live_loop import run_live_loop
-from runtime.startup import block_historical_waves, restore_pine_style_pending_orders
+from runtime.startup import block_historical_waves, restore_all_pending_orders
 ACTIVE_CFG = LIVE_BOT_CONFIG
 
 
@@ -63,7 +63,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = apply_wave_positions_only_to_bot_config(_resolve_config(args.config))
+    cfg = resolve_grid_engine_config(_resolve_config(args.config))
     ACTIVE_CFG = cfg
 
     # 1) Setup loggeru (pred lockem — pokus o 2. instanci se zapise do .jsonl)
@@ -192,8 +192,8 @@ def main() -> None:
         )
         sent_signals = set()
     else:
-        # Standardni startup: pine-style recovery + blokace historickych vln
-        sent_signals = restore_pine_style_pending_orders(cfg)
+        # Standardni startup: session snapshot + pine recovery + blokace historickych vln
+        sent_signals = restore_all_pending_orders(cfg)
         sent_signals = block_historical_waves(cfg, sent_signals)
 
         log.info(

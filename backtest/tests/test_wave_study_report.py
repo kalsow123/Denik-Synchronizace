@@ -3,7 +3,32 @@ from __future__ import annotations
 
 from backtest.grid.aggregator import build_grid_report
 from backtest.grid.backtest_conf import generate_combinations, get_profile
-from backtest.grid.study_mode import apply_wave_isolation_report_stats, study_base_key
+from backtest.grid.study_mode import (
+    apply_wave_isolation_report_stats,
+    filter_trades_df_for_grid_stats,
+    study_base_key,
+)
+
+
+def test_filter_trades_df_for_grid_stats_wave_isolation():
+    import pandas as pd
+
+    from backtest.plotting import _trades_to_df
+
+    df = pd.DataFrame(
+        {
+            "position_kind": ["WAVE", "WAVE_COUNTER", "WAVE"],
+            "pnl_usd": [1.0, -2.0, 3.0],
+        }
+    )
+    out = filter_trades_df_for_grid_stats(
+        df,
+        {"wave_isolation_study": True},
+    )
+    assert list(out["position_kind"]) == ["WAVE", "WAVE"]
+    assert filter_trades_df_for_grid_stats(df, {"wave_isolation_study": False}).shape[0] == 3
+    # plot_top_n_grid musí použít trades_to_df — _trades_to_df nemá position_kind → filtr neprojde.
+    assert "position_kind" not in _trades_to_df([]).columns
 
 
 def test_wave_isolation_report_masks_counter_and_two_sided():

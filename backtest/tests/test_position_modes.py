@@ -9,6 +9,7 @@ from config.position_modes import (
     bot_config_is_wave_positions_only,
     grid_is_wave_positions_only,
     plan_grid_position_flags,
+    resolve_grid_engine_config,
 )
 def test_grid_implicit_wave_positions_only():
     d = {
@@ -70,6 +71,20 @@ def test_live_normalizer_forces_modules_off():
     assert out.bos_entry_enable is False
     assert out.ext_enabled is False
     assert out.wave_isolation_study is False
+
+
+def test_live_grid_engine_config_matches_combo2():
+    """Live runtime = grid_dict_to_bot_config (engine iso False, counter ordery ON)."""
+    from config.bot_config import LIVE_BOT_CONFIG
+
+    out = resolve_grid_engine_config(LIVE_BOT_CONFIG)
+    assert out.wave_isolation_study is False
+    assert out.wave_counter_two_sided_enabled is True
+    assert out.bos_entry_in_rrr_fixed is True
+    assert out.ext_enabled is True
+    assert out.ext_counter_enabled is True
+    assert out.pp_enabled is False
+    assert out.bos_entry_enable is False
 
 
 def test_live_implicit_wave_only_from_flags():

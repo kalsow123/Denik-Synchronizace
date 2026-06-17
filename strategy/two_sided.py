@@ -637,3 +637,83 @@ def waves_for_visual_display(
         )
     )
     return out
+
+
+def build_two_sided_wave_bar_maps(
+    waves: List[dict],
+    wave_birth_by_time: Dict[str, int],
+) -> tuple[Dict[int, List[dict]], Dict[int, List[dict]]]:
+    """Stejne mapovani jako backtest engine: birth_bar a draw_right."""
+    waves_by_bar: Dict[int, List[dict]] = {}
+    waves_by_end_bar: Dict[int, List[dict]] = {}
+    for w in waves:
+        wt = str(w.get("wave_time", ""))
+        birth = wave_birth_by_time.get(wt)
+        if birth is not None:
+            waves_by_bar.setdefault(int(birth), []).append(w)
+        end_ix = int(w.get("draw_right", w.get("draw_left", 0)))
+        waves_by_end_bar.setdefault(end_ix, []).append(w)
+    return waves_by_bar, waves_by_end_bar
+
+
+def replay_two_sided_tracker_engine_parity(
+    tracker: TwoSidedTracker,
+    df: pd.DataFrame,
+    waves: List[dict],
+    cfg: BotConfig,
+    *,
+    wave_birth_by_time: Dict[str, int],
+    trend_states_per_wave: Optional[Dict[str, Any]] = None,
+    preserve_counter_b_wave_times: bool = True,
+) -> None:
+    """
+    Bar-by-bar replay two-sided trackeru — stejne poradi jako backtest/engine.py:
+      1) register_parent pro vlny s draw_right == i
+      2) update_bar(high, low, i)
+      3) register_parent pro nove narozene vlny (birth_bar == i) splnujici parent_wave_qualifies
+    """
+    saved_counter_b: Set[str] = set()
+    if preserve_counter_b_wave_times:
+        saved_counter_b = set(tracker.counter_b_wave_times)
+    tracker.clear_all()
+    if preserve_counter_b_wave_times:
+        tracker.counter_b_wave_times |= saved_counter_b
+
+    if not two_sided_enabled(cfg) or df is None or len(df) < 2 or not waves:
+        return
+
+    ts_map = trend_states_per_wave or {}
+    waves_by_bar, waves_by_end_bar = build_two_sided_wave_bar_maps(
+        waves, wave_birth_by_time
+    )
+
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        high = float(row["high"])
+        low = float(row["low"])
+
+        for w in waves_by_end_bar.get(i, []):
+            wt = str(w.get("wave_time", ""))
+            tracker.register_parent(
+                w,
+                i,
+                cfg,
+                df=df,
+                sync_from_bar=parent_monitor_start_bar(w),
+                trend_state=ts_map.get(wt),
+            )
+
+        tracker.update_bar(high, low, i)
+
+        for w in waves_by_bar.get(i, []):
+            wt = str(w.get("wave_time", ""))
+            if parent_wave_qualifies(w, cfg, trend_state=ts_map.get(wt)):
+                tracker.register_parent(
+                    w,
+                    i,
+                    cfg,
+                    df=df,
+                    sync_from_bar=parent_monitor_start_bar(w),
+                    trend_state=ts_map.get(wt),
+                )
+

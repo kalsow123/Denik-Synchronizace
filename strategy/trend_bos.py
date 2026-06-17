@@ -405,6 +405,10 @@ def _advance_bos_timeline_bar(
     for w in waves_by_extreme_bar.get(bar_ix, []):
         if bool(w.get("post_ext_trend_suppressed", False)):
             continue
+        if w.get("ext_post_range_terminator"):
+            # §1.4 / CESTA D: po ukončení EXT (W2…) už neplatí forgive prvního BOS
+            # z původní EXT1 — WAVE_BOS z terminátoru musí projít.
+            state.trend_established_by_ext = False
         maybe_update_trend_state_with_wave(state, w, cfg)
 
     for w in waves_by_birth_bar.get(bar_ix, []):
@@ -925,13 +929,15 @@ def should_update_trend_state_for_wave(state: TrendState,
     wdir = int(wave["dir"])
     if state.direction == "neutral":
         return True
-    # EXT both-sides: trend-dir vlna v okne aktualizuje BOS swing i bez HH/HL
-    # (napr. WAVE4 po EXT3 — jinak zustane stary lub a chybi close-BOS flip).
-    if bool(wave.get("in_ext_range", False)):
+    # Vlna ukoncujici EXT §1.2 — musi nastavit swing pro nasledny WAVE_BOS.
+    if bool(wave.get("ext_post_range_terminator", False)):
         if wdir == 1 and state.direction == "bull":
             return True
         if wdir == -1 and state.direction == "bear":
             return True
+        return False
+    # §1.4: uvnitř EXT both-sides okna se WAVE_BOS netvoří — neposouvat BOS swing.
+    if bool(wave.get("in_ext_range", False)):
         return False
     if wdir == 1 and state.direction == "bull":
         if state.last_up_box_top is not None and _wave_move_pct_below_swing_threshold(
@@ -954,6 +960,8 @@ def maybe_update_trend_state_with_wave(state: TrendState,
     """Aktualizuje trend stav vlnou jen pokud `should_update_trend_state_for_wave`."""
     if should_update_trend_state_for_wave(state, wave, cfg):
         _update_state_with_wave(state, wave)
+    if bool(wave.get("ext_post_range_terminator")):
+        state.trend_established_by_ext = False
 
 
 def filter_waves_for_structure_display(df: pd.DataFrame,

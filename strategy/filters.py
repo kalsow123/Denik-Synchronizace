@@ -16,16 +16,24 @@ SESSIONS: dict = {
 }
 
 
-    # Vrací True, pokud je vlna starší než cfg.max_wave_age_hours
-def is_wave_too_old(wave_time: str, cfg: BotConfig, now: datetime | None = None) -> bool:
+    # Vrací True, pokud je vlna starší než cfg.max_wave_age_hours od ref_time.
+    # Backtest: ref_time = cas simulovaneho baru. Live: posledni close bar z MT5.
+def is_wave_too_old(
+    wave_time: str,
+    cfg: BotConfig,
+    *,
+    ref_time: datetime | None = None,
+    now: datetime | None = None,
+) -> bool:
     wave_dt = datetime.strptime(wave_time, "%Y%m%d%H%M")
-    if now is None:
-        now_ref = datetime.utcnow()
-    elif now.tzinfo is not None:
-        now_ref = now.astimezone(timezone.utc).replace(tzinfo=None)
-    else:
-        now_ref = now
-    age_sec = (now_ref - wave_dt).total_seconds()
+    anchor = ref_time if ref_time is not None else now
+    if anchor is None:
+        anchor = datetime.utcnow()
+    if hasattr(anchor, "to_pydatetime"):
+        anchor = anchor.to_pydatetime()
+    if anchor.tzinfo is not None:
+        anchor = anchor.astimezone(timezone.utc).replace(tzinfo=None)
+    age_sec = (anchor - wave_dt).total_seconds()
     return age_sec > cfg.max_wave_age_hours * 3600
 
 

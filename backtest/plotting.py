@@ -158,11 +158,10 @@ def _find_drawdown_episodes(
 ) -> list[dict]:
     """
     Souvislá období pod running peak na křivce (kumul. PnL / equity).
-    loss_usd = součet záporných obchodů v intervalu, jinak hloubka DD (peak − trough).
+    loss_usd = hloubka DD v USD (peak − trough), shodné s max_drawdown_usd v reportu.
     """
     t = pd.Series(pd.to_datetime(times)).reset_index(drop=True)
     y = np.asarray(y_values, dtype=float)
-    pnl = None if pnl_values is None else np.asarray(pnl_values, dtype=float)
     n = len(y)
     if n == 0:
         return []
@@ -173,13 +172,12 @@ def _find_drawdown_episodes(
     start_i = 0
     ep_peak = 0.0
     trough = 0.0
-    neg_pnl_sum = 0.0
 
     for i in range(n):
         yi = float(y[i])
         if yi >= running_peak - 1e-9:
             if in_episode:
-                loss = float(neg_pnl_sum) if pnl is not None else float(ep_peak - trough)
+                loss = float(ep_peak - trough)
                 if loss >= min_loss_usd:
                     x0, x1 = _segment_x_bounds(t, start_i, i - 1)
                     episodes.append(
@@ -199,14 +197,11 @@ def _find_drawdown_episodes(
                 start_i = i
                 ep_peak = running_peak
                 trough = yi
-                neg_pnl_sum = 0.0
             else:
                 trough = min(trough, yi)
-            if pnl is not None and pnl[i] < 0:
-                neg_pnl_sum += float(-pnl[i])
 
     if in_episode:
-        loss = float(neg_pnl_sum) if pnl is not None else float(ep_peak - trough)
+        loss = float(ep_peak - trough)
         if loss >= min_loss_usd:
             x0, x1 = _segment_x_bounds(t, start_i, n - 1)
             episodes.append(
@@ -290,7 +285,7 @@ def add_equity_loss_background_to_figure(
 ) -> None:
     """
     Zvýrazní ztrátová období (pod running peak) červeným pásem a popiskem
-    celkové ztráty v USD za dané období (součet záporných obchodů, jinak peak−trough).
+    hloubky DD v USD (peak − trough).
     """
     if go is None:
         return
@@ -1238,7 +1233,22 @@ def plot_top_n_grid(
             print(f"[plot]   {name}: 0 trades, preskoc")
             continue
 
-        df_t = _trades_to_df(trades)
+        from backtest.grid.study_mode import filter_trades_df_for_grid_stats
+        from backtest.stats import trades_to_df
+
+        # trades_to_df (ne _trades_to_df) — filter wave_isolation_study potřebuje position_kind.
+        df_t = filter_trades_df_for_grid_stats(trades_to_df(trades), combo)
+        if df_t.empty:
+            print(f"[plot]   {name}: 0 trades po wave_isolation filtru, preskoc")
+            continue
+
+        if len(df_t) < len(trades):
+            keep_times = set(pd.to_datetime(df_t["close_time"]))
+            trades = [
+                t for t in trades
+                if pd.Timestamp(t.close_time) in keep_times
+            ]
+
         df_t["equity"] = initial_balance + df_t["pnl_usd"].cumsum()
         total_pnl = float(df_t["pnl_usd"].sum())
 

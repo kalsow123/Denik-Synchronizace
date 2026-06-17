@@ -1,6 +1,8 @@
 """Rezim grid study — srovnatelnost WAVE vs plny beh."""
 from __future__ import annotations
 
+import pandas as pd
+
 from config.position_modes import (
     grid_backtest_isolation_study,
     grid_is_wave_positions_only,
@@ -19,13 +21,41 @@ STUDY_PAIR_SKIP_KEYS = frozenset({
 })
 
 
+def _study_key_part(value) -> object:
+    """Normalizace pro hashovatelný study_base_key (list/dict z BotConfig → tuple)."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, tuple):
+        return tuple(_study_key_part(v) for v in value)
+    if isinstance(value, list):
+        return tuple(_study_key_part(v) for v in value)
+    if isinstance(value, dict):
+        return tuple(
+            (str(k), _study_key_part(v))
+            for k, v in sorted(value.items(), key=lambda item: str(item[0]))
+        )
+    return str(value)
+
+
 def study_base_key(cfg: dict) -> tuple:
     """Klic pro parovani study radku s plnou kombinaci (stejne parametry, jiny rezim)."""
     return tuple(
-        (k, cfg[k])
+        (k, _study_key_part(cfg[k]))
         for k in sorted(cfg)
         if not str(k).startswith("__") and k not in STUDY_PAIR_SKIP_KEYS
     )
+
+
+def filter_trades_df_for_grid_stats(
+    trades_df: pd.DataFrame,
+    cfg: dict,
+) -> pd.DataFrame:
+    """Stejná sada obchodů jako grid_runner / xlsx (WAVE slice pro wave_isolation_study)."""
+    if trades_df is None or trades_df.empty:
+        return trades_df
+    if grid_backtest_isolation_study(cfg) and "position_kind" in trades_df.columns:
+        return trades_df[trades_df["position_kind"] == "WAVE"].copy()
+    return trades_df
 
 
 def apply_wave_isolation_report_stats(stats: dict, cfg: dict | None = None) -> dict:

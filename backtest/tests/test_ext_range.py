@@ -199,15 +199,11 @@ def test_visual_keeps_counter_wave_that_precedes_bos_flip():
     assert "202603050800" in getattr(eng, "_bos_wave_times", set())
 
 
-def test_post_ext_trend_suppression_april_1_bear_wave_invisible():
+def test_post_ext_hh_terminator_no_seed_april_1():
     """
-    Po EXT v 03/31, kdy se v ext_range vytvori 2 UP vlny + 1 DOWN vlna,
-    `202604011130` je seed-wave (bull trend potvrzen). BEAR vlna v 04/01 15:30
-    (`202604011530`) tedy spada do bull-lock zony az do baru BOS flipu (21:00).
-    Tato vlna musi byt potlacena:
-      * NENI ve vizualu,
-      * NENI v `_bos_wave_times` (ani kdyz by jinak BOS zpusobila),
-      * ma tag `post_ext_trend_suppressed=True`.
+    Po EXT UP 03/31: prvni UP `202604010300` s HH nad EXT ukonci both-sides (§1.2a).
+    Seed tracker se vypne — dalsi vlny jedou klasickym WAVE rezimem (WAVE_BOS),
+    ne pres `ext_post_trend_seed_dir`. BEAR korekce neni seed-lock suppressed.
     """
     cfg = _cfg()
     cfg.wave_position_enabled = True
@@ -221,16 +217,18 @@ def test_post_ext_trend_suppression_april_1_bear_wave_invisible():
     eng.run(df, retain_wave_snapshot=True)
 
     by_wt = {str(w["wave_time"]): w for w in eng.last_waves}
-    assert by_wt["202604011130"].get("ext_post_trend_seed_dir") == 1
-    assert by_wt["202604011530"].get("post_ext_trend_suppressed") is True
+    assert by_wt["202604010300"].get("ext_post_range_terminator") is True
+    assert by_wt["202604010300"].get("in_ext_range") is False
+    assert by_wt["202604011130"].get("ext_post_trend_seed_dir") is None
+    assert by_wt["202604011530"].get("post_ext_trend_suppressed") is not True
+
+    assert eng.wave_sequence_info["202604010300"].index_in_trend == 2
+    assert eng.wave_sequence_info["202604011130"].index_in_trend == 3
+    assert eng.wave_sequence_info["202604011530"].index_in_trend is None
 
     vis = {str(w["wave_time"]) for w in eng.last_waves_for_visual}
-    assert "202604011530" not in vis
-    assert "202604011530" not in set(eng._bos_wave_times)
-
-    # Sanity: UP seed wave + bear wave po BOS flipu (22:00) zustavaji viditelne.
+    assert "202604010300" in vis
     assert "202604011130" in vis
-    assert "202604012200" in vis
 
 
 def test_post_ext_trend_suppression_march_24_up_waves_invisible():
@@ -274,13 +272,15 @@ def test_post_ext_suppressed_wave_is_not_picked_as_bos_wave():
     zpusobila close-based flip. Tim je oddelena funkcnost:
       * post-EXT zamek potlacuje vlny v zamcene zone (samostatne pravidlo),
       * BOS retro mechanismus pres ne neprochazi (= nikdy je nevykresli).
+
+    Segment brezen 24: seed -1 na `202603240700`, UP vlny v bear-lock zone.
     """
     cfg = _cfg()
     cfg.wave_position_enabled = True
     cfg.tp_mode = TPMode.BOS_EXIT
     df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
-    df = df[(df["time"] >= "2026-03-30") & (df["time"] <= "2026-04-03 23:59:59")].reset_index(
+    df = df[(df["time"] >= "2026-03-22") & (df["time"] <= "2026-03-26 23:59:59")].reset_index(
         drop=True
     )
     eng = BacktestEngine(cfg)

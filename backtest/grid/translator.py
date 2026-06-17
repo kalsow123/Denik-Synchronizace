@@ -290,6 +290,110 @@ def grid_backtest_position_cap_settings(d: dict) -> tuple[str, int | None]:
     return mode, (limit if limit > 0 else None)
 
 
+# Vychozi simulacni parametry gridu (EXAMPLE profil) — live_match parita s grid backtesterem.
+_LIVE_MATCH_GRID_SIM_DEFAULTS: dict = {
+    "spread": 0.0001,
+    "slippage": 0.0,
+    "track_concurrent_positions": True,
+    "backtest_position_cap_mode": "off",
+    "backtest_max_open_positions": None,
+}
+
+
+def bot_config_to_grid_combo_dict(
+    cfg: BotConfig,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    combo_no: int = 1,
+) -> dict:
+    """
+    Grid combo dict z BotConfig — jen skalární klíče jako u grid profilu (EXAMPLE).
+    """
+    from config.bot_config import ABORT_FIB_SHIFT_SL
+
+    def _enum(v):
+        return v.value if hasattr(v, "value") else v
+
+    abort = cfg.abort_fib_level
+    if abort in (ABORT_FIB_SHIFT_SL, "deep_retrace_shift_sl", "shift_sl"):
+        abort_fib: float | str | None = "shift_sl"
+    else:
+        abort_fib = abort
+
+    combo: dict = {
+        "symbol": cfg.symbol,
+        "timeframe": cfg.timeframe_label,
+        "date_from": date_from,
+        "date_to": date_to,
+        "bot_name": cfg.bot_name,
+        "_grid_test_pozice": int(combo_no),
+        "wave_min_pct": cfg.wave_min_pct,
+        "min_opp_bars": cfg.min_opp_bars,
+        "rrr": cfg.rrr,
+        "fib_level": cfg.entry_fib_level,
+        "entry_mode": _enum(cfg.entry_mode),
+        "tp_mode": _enum(cfg.tp_mode),
+        "tp_target_wave_index": cfg.tp_target_wave_index,
+        "wave_extension_pct": cfg.wave_extension_pct,
+        "sl_fib_level": cfg.sl_fib_level,
+        "abort_fib_level": abort_fib,
+        "wave_plus": cfg.wave_plus,
+        "order_expiry_days": cfg.order_expiry_days,
+        "ext_order_expiry_days": cfg.ext_order_expiry_days,
+        "pending_cancel_mode": _enum(cfg.pending_cancel_mode),
+        "pending_cancel_after_days": cfg.pending_cancel_after_days,
+        "wave_max_pct": cfg.wave_max_pct,
+        "max_wave_age_hours": cfg.max_wave_age_hours,
+        "risk_usd": cfg.risk_usd,
+        "pp_risk_usd": cfg.pp_risk_usd,
+        "contract_size": cfg.contract_size,
+        "magic": cfg.magic,
+        "wave_min_sl": cfg.wave_min_sl,
+        "wave_position_enabled": cfg.wave_position_enabled,
+        "wave_positions_only": cfg.wave_positions_only,
+        "wave_isolation_study": cfg.wave_isolation_study,
+        "wave_counter_two_sided_enabled": cfg.wave_counter_two_sided_enabled,
+        "counter_position_enabled": cfg.counter_position_enabled,
+        "two_sided_entry_enabled": cfg.two_sided_entry_enabled,
+        "two_sided_entry_min_wave_pct": cfg.two_sided_entry_min_wave_pct,
+        "skip_primary_entry_on_parent_wave_enable": cfg.skip_primary_entry_on_parent_wave_enable,
+        "wf_enabled": cfg.wf_enabled,
+        "pp_enabled": cfg.pp_enabled,
+        "pp_sl_pct": cfg.pp_sl_pct,
+        "pp_disabled_in_ext_context": cfg.pp_disabled_in_ext_context,
+        "trend_filter_enabled": cfg.trend_filter_enabled,
+        "trend_hh_hl_filter_enabled": cfg.trend_hh_hl_filter_enabled,
+        "bos_entry_enable": cfg.bos_entry_enable,
+        "bos_entry_in_rrr_fixed": cfg.bos_entry_in_rrr_fixed,
+        "wave_2_no_tp_enable": cfg.wave_2_no_tp_enable,
+        "wave_2_no_tp_max_index": cfg.wave_2_no_tp_max_index,
+        "wave_size_sl_ladder_base_pct": cfg.wave_size_sl_ladder_base_pct,
+        "wave_size_sl_ladder_step_pct": cfg.wave_size_sl_ladder_step_pct,
+        "wave_size_sl_ladder_band_size_pct": cfg.wave_size_sl_ladder_band_size_pct,
+        "ext_enabled": cfg.ext_enabled,
+        "ext_wave_min_pct": cfg.ext_wave_min_pct,
+        "ext_secondary_enabled": cfg.ext_secondary_enabled,
+        "ext_weekend_gap_relax_factor": cfg.ext_weekend_gap_relax_factor,
+        "ext_counter_enabled": cfg.ext_counter_enabled,
+        "ext_counter_time": cfg.ext_counter_time,
+        "ext_counter_min_sl_enabled": cfg.ext_counter_min_sl_enabled,
+        "ext_counter_min_sl_pct": cfg.ext_counter_min_sl_pct,
+        "ext_trade_both_sides_in_range": cfg.ext_trade_both_sides_in_range,
+        "wave_min_pct_enable": cfg.wave_min_pct_enable,
+        "ext_post_both_sides_wave_min_pct": cfg.ext_post_both_sides_wave_min_pct,
+        "ext_post_both_sides_default_sl_pct": cfg.ext_post_both_sides_default_sl_pct,
+        "ext_close_trend_positions_on_bos": cfg.ext_close_trend_positions_on_bos,
+        "adx14_change_enabled": cfg.adx14_change_enabled,
+        "adx14_equity_gate_enabled": cfg.adx14_equity_gate_enabled,
+        "pnl_base_tracker_enabled": cfg.pnl_base_tracker_enabled,
+        "wave_allowed_sessions": None,
+        "wave_custom_window": None,
+    }
+    combo.update(_LIVE_MATCH_GRID_SIM_DEFAULTS)
+    return combo
+
+
 def grid_dicts_to_bot_configs(combos: List[dict]) -> List[BotConfig]:
     """Prevede seznam grid kombinaci na seznam BotConfig instanci."""
     return [grid_dict_to_bot_config(d) for d in combos]

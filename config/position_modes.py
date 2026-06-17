@@ -4,7 +4,7 @@ Rezim pouze klasickych WAVE pozic (fib trend-follow).
 Pouziti:
   - grid / vsechny profily: wave_positions_only=True NEBO implicitne (WAVE on, ostatni moduly off)
   - backtest wave study: + wave_isolation_study=True → engine bezi s plnym counterem (stejne WAVE)
-  - live: wave_positions_only vynuti vypnuti modulu; isolation study se na live neaplikuje
+  - live: wave_positions_only + plan_grid_position_flags (wave_isolation_study = stejne flagy jako grid combo 2)
 """
 from __future__ import annotations
 
@@ -193,27 +193,82 @@ def plan_grid_position_flags(d: dict) -> GridPositionFlagPlan:
     )
 
 
+def _bot_config_to_grid_dict(cfg: BotConfig) -> dict:
+    """Minimalni dict pro plan_grid_position_flags z BotConfig."""
+    return {
+        "wave_positions_only": bool(getattr(cfg, "wave_positions_only", False)),
+        "wave_isolation_study": bool(getattr(cfg, "wave_isolation_study", False)),
+        "wave_position_enabled": bool(getattr(cfg, "wave_position_enabled", True)),
+        "wave_counter_two_sided_enabled": bool(
+            getattr(cfg, "wave_counter_two_sided_enabled", False)
+        ),
+        "counter_position_enabled": bool(getattr(cfg, "counter_position_enabled", False)),
+        "two_sided_entry_enabled": bool(getattr(cfg, "two_sided_entry_enabled", False)),
+        "pp_enabled": bool(getattr(cfg, "pp_enabled", False)),
+        "bos_entry_enable": bool(getattr(cfg, "bos_entry_enable", False)),
+        "bos_reentry_enabled": bool(getattr(cfg, "bos_reentry_enabled", False)),
+        "bos_entry_in_rrr_fixed": bool(getattr(cfg, "bos_entry_in_rrr_fixed", False)),
+        "ext_enabled": bool(getattr(cfg, "ext_enabled", False)),
+        "ext_secondary_enabled": bool(getattr(cfg, "ext_secondary_enabled", False)),
+        "ext_counter_enabled": bool(getattr(cfg, "ext_counter_enabled", False)),
+    }
+
+
+def resolve_grid_engine_config(
+    cfg: BotConfig,
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> BotConfig:
+    """
+    Engine BotConfig stejně jako grid backtester (combo dict → grid_dict_to_bot_config).
+
+    Combo dict může nést wave_isolation_study=True (report / plan_grid), ale engine
+    pole wave_isolation_study zůstane False — counter ordery běží (parita grid combo 2).
+    Live-only pole (session, startup_bars, …) se berou ze zdrojového cfg.
+    """
+    from backtest.grid.translator import bot_config_to_grid_combo_dict, grid_dict_to_bot_config
+
+    combo = bot_config_to_grid_combo_dict(cfg, date_from=date_from, date_to=date_to)
+    engine = grid_dict_to_bot_config(combo)
+    updates = {
+        f.name: getattr(engine, f.name)
+        for f in fields(BotConfig)
+        if getattr(engine, f.name) != getattr(cfg, f.name)
+    }
+    return replace(cfg, **updates) if updates else cfg
+
+
 def apply_wave_positions_only_to_bot_config(cfg: BotConfig) -> BotConfig:
     """
-    Live / CONFIG_REGISTRY: vynuti jen klasické WAVE.
-    wave_isolation_study na live nikdy neaplikovat.
+    Live / CONFIG_REGISTRY: normalizace WAVE rezimu stejne jako grid translator.
+
+    wave_isolation_study=True (combo 2): zachova ext/counter/bos_entry_in_rrr_fixed
+    a zapne engine counter — stejna logika jako plan_grid_position_flags.
     """
-    if not bot_config_is_wave_positions_only(cfg):
+    explicit = bool(getattr(cfg, "wave_positions_only", False))
+    if not explicit and not bot_config_is_wave_positions_only(cfg):
         return cfg
+
+    d = _bot_config_to_grid_dict(cfg)
+    if not explicit:
+        d["wave_positions_only"] = True
+    plan = plan_grid_position_flags(d)
+
     names = {f.name for f in fields(BotConfig)}
     updates: dict[str, Any] = {
-        "wave_positions_only": True,
-        "wave_position_enabled": True,
-        "wave_counter_two_sided_enabled": False,
-        "counter_position_enabled": False,
-        "two_sided_entry_enabled": False,
-        "pp_enabled": False,
-        "bos_entry_enable": False,
-        "bos_reentry_enabled": False,
-        "bos_entry_in_rrr_fixed": False,
-        "ext_enabled": False,
-        "ext_secondary_enabled": False,
-        "ext_counter_enabled": False,
-        "wave_isolation_study": False,
+        "wave_positions_only": plan.wave_positions_only,
+        "wave_isolation_study": plan.wave_isolation_study,
+        "wave_position_enabled": plan.wave_position_enabled,
+        "wave_counter_two_sided_enabled": plan.wave_counter_two_sided_enabled,
+        "counter_position_enabled": plan.counter_position_enabled,
+        "two_sided_entry_enabled": plan.two_sided_entry_enabled,
+        "pp_enabled": plan.pp_enabled,
+        "bos_entry_enable": plan.bos_entry_enable,
+        "bos_reentry_enabled": plan.bos_entry_enable,
+        "bos_entry_in_rrr_fixed": plan.bos_entry_in_rrr_fixed,
+        "ext_enabled": plan.ext_enabled,
+        "ext_secondary_enabled": plan.ext_secondary_enabled,
+        "ext_counter_enabled": plan.ext_counter_enabled,
     }
     return replace(cfg, **{k: v for k, v in updates.items() if k in names})
