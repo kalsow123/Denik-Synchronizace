@@ -182,13 +182,7 @@ def main() -> None:
     #   filtry, MAGIC, atd.) sdílené se standardním flow.
     # =====================================================================
     _wf_on = bool(getattr(cfg, "wf_enabled", False))
-    print(
-        "\n=== Wick Fakeout Recovery (WF) ===\n"
-        f"WF_ENABLED: {_wf_on}\n"
-        "(Aktivuje se POUZE když v okně po last wave byl wick přes opačný extrém\n"
-        " bez close-BOS a aktuální close je za opačným extrémem last wave.\n"
-        " Výjimka: WF se neaktivuje, pokud je trh v EXT.)\n"
-    )
+    log.info("WF_ENABLED=%s (Wick Fakeout Recovery)", _wf_on)
 
     # 4) Startup recovery
     # Pokud session manager zapnuty a startujeme mimo session,
