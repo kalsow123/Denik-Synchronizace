@@ -88,8 +88,24 @@ def load_from_mt5(symbol: str, timeframe_str: str, n_bars: int = 5000) -> pd.Dat
     if tf is None:
         raise ValueError(f"Neznamy timeframe: {timeframe_str}")
 
-    if not mt5.initialize():
+    from mt5_credentials import MT5_LOGIN, MT5_PASSWORD, MT5_SERVER, MT5_PATH
+
+    if not mt5.initialize(
+        path=str(MT5_PATH),
+        login=MT5_LOGIN,
+        password=MT5_PASSWORD,
+        server=MT5_SERVER,
+    ):
         raise RuntimeError(f"MT5 initialize() selhal: {mt5.last_error()}")
+
+    ai = mt5.account_info()
+    if ai is None or ai.login != MT5_LOGIN or ai.server != MT5_SERVER:
+        mt5.shutdown()
+        raise RuntimeError(
+            f"MT5 pripojen na jiny ucet nez credentials "
+            f"(ocekavano {MT5_LOGIN}/{MT5_SERVER}, "
+            f"je {getattr(ai, 'login', None)}/{getattr(ai, 'server', None)})"
+        )
 
     rates = mt5.copy_rates_from_pos(symbol, tf, 0, n_bars)
     mt5.shutdown()

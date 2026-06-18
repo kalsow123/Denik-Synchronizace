@@ -2,12 +2,26 @@ import MetaTrader5 as mt5
 import pandas as pd
 from pathlib import Path
 
-# Připojení na MT5
-if not mt5.initialize():
+from mt5_credentials import MT5_LOGIN, MT5_PASSWORD, MT5_SERVER, MT5_PATH
+
+# Připojení na dedikovaný MT5 terminál tohoto bota (viz mt5_credentials.py)
+if not mt5.initialize(
+    path=str(MT5_PATH),
+    login=MT5_LOGIN,
+    password=MT5_PASSWORD,
+    server=MT5_SERVER,
+):
     print("MT5 initialize() failed, error:", mt5.last_error())
     quit()
 
-print("MT5 připojeno:", mt5.terminal_info().name)
+ti = mt5.terminal_info()
+ai = mt5.account_info()
+print("MT5 připojeno:", ti.name if ti else "?", "path:", ti.path if ti else "?")
+print("Účet:", ai.login if ai else "?", "server:", ai.server if ai else "?")
+if ai and (ai.login != MT5_LOGIN or ai.server != MT5_SERVER):
+    print(f"[CHYBA] Připojen jiný účet než v credentials ({MT5_LOGIN} / {MT5_SERVER})")
+    mt5.shutdown()
+    quit()
 
 # Timeframy
 timeframes = {

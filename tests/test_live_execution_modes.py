@@ -14,9 +14,9 @@ from runtime.live_wave_isolation import (
 )
 
 
-def test_classify_wave_slice_combo2():
+def test_classify_wave_study_variant_b():
     cfg = resolve_live_execution_config(LIVE_BOT_CONFIG)
-    assert classify_live_execution_mode(cfg) == "wave_slice"
+    assert classify_live_execution_mode(cfg) == "wave_study_wave_only"
     assert live_wave_isolation_mt5_active(cfg)
 
 

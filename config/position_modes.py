@@ -4,7 +4,7 @@ Rezim pouze klasickych WAVE pozic (fib trend-follow).
 Pouziti:
   - grid / vsechny profily: wave_positions_only=True NEBO implicitne (WAVE on, ostatni moduly off)
   - backtest wave study: + wave_isolation_study=True → engine bezi s plnym counterem (stejne WAVE)
-  - live: wave_isolation_study → MT5 engine parita WAVE+counter+EXT counter (runtime/live_wave_isolation.py)
+  - live: wave_isolation_study=True (B) → engine routing plny, MT5 jen WAVE
 """
 from __future__ import annotations
 

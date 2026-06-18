@@ -351,11 +351,13 @@ def update_trade_tracker(
                 )
 
             if adx14_runtime is not None and getattr(adx14_runtime, "pnl_tracker", None):
+                from config.bot_config import trade_risk_usd
+
                 close_iso = close_data.get("close_time") or datetime.now(timezone.utc).isoformat()
                 adx14_runtime.on_position_closed(
                     close_time=close_iso,
                     pnl_usd=float(close_data["pnl_usd"]),
-                    source_risk_usd=float(cfg.risk_usd),
+                    source_risk_usd=trade_risk_usd(cfg, is_pp=(position_kind == "PP")),
                     note=str(wave_id or ""),
                     now=datetime.now(timezone.utc),
                 )

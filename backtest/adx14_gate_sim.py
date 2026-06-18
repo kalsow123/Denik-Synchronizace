@@ -46,7 +46,6 @@ class Adx14BacktestSim:
                 state_path=os.path.join(tmp, "pnl_state.json"),
                 jsonl_path=os.path.join(tmp, "pnl.jsonl"),
                 csv_path=os.path.join(tmp, "pnl.csv"),
-                monitor_risk_usd=cfg.pnl_base_tracker_risk_usd,
             )
 
         if cfg.adx14_equity_gate_enabled:

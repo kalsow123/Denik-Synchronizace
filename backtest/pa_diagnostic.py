@@ -38,14 +38,10 @@ class PADailyFrame:
 
 
 def pnl_base_curve_for_trades(closed_trades: list, cfg: BotConfig) -> pd.DataFrame:
-    """PnL základní — škálovaný na pnl_base_tracker_risk_usd (stejný zdroj jako ADX14 gate)."""
+    """PnL základní — risk podle cfg.risk_usd / cfg.pp_risk_usd dle typu pozice."""
     if not closed_trades:
         return pd.DataFrame(columns=["time", "cumulative_pnl_usd"])
-    return BasePnLTracker.build_curve_from_closed_trades(
-        closed_trades,
-        monitor_risk_usd=float(cfg.pnl_base_tracker_risk_usd),
-        source_risk_usd=float(cfg.risk_usd),
-    )
+    return BasePnLTracker.build_curve_from_closed_trades(closed_trades, cfg=cfg)
 
 
 def pa_metric_xy(series: pd.Series) -> tuple[pd.Index, pd.Series]:

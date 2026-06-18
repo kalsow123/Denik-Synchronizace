@@ -61,7 +61,6 @@ class Adx14LiveRuntime:
                 state_path=cfg.pnl_base_tracker_state_path,
                 jsonl_path=cfg.pnl_base_tracker_jsonl_path,
                 csv_path=cfg.pnl_base_tracker_csv_path,
-                monitor_risk_usd=cfg.pnl_base_tracker_risk_usd,
             )
 
         if cfg.adx14_equity_gate_enabled:

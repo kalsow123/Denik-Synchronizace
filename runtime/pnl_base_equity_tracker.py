@@ -1,11 +1,8 @@
 """
-Live base-PnL tracker with independent risk size.
+Live base-PnL tracker.
 
-This tracks a "PnL základní" curve for live trading, independent of the live
-bot's actual risk setting. Example: live bot risks 250 USD, but this monitor
-can still display the curve as if risk_per_position_usd=500.
-
-No third-party packages are required.
+Tracks a "PnL základní" curve using each trade's configured risk
+(cfg.risk_usd or cfg.pp_risk_usd via trade_risk_usd()).
 """
 
 from __future__ import annotations
@@ -31,7 +28,6 @@ class PnLPoint:
 
 @dataclass
 class PnLTrackerState:
-    monitor_risk_usd: float = 500.0
     cumulative_pnl_usd: float = 0.0
     equity_high_usd: float = 0.0
     previous_high_usd: float = 0.0
@@ -61,7 +57,6 @@ class BasePnLTracker:
         state_path: str | Path = "runtime/pnl_base_tracker_state.json",
         jsonl_path: str | Path = "runtime/pnl_base_tracker.jsonl",
         csv_path: str | Path = "runtime/pnl_base_curve.csv",
-        monitor_risk_usd: float = 500.0,
     ):
         self.state_path = Path(state_path)
         self.jsonl_path = Path(jsonl_path)
@@ -71,11 +66,11 @@ class BasePnLTracker:
         self.csv_path.parent.mkdir(parents=True, exist_ok=True)
         if self.state_path.exists():
             raw = json.loads(self.state_path.read_text(encoding="utf-8"))
+            raw.pop("monitor_risk_usd", None)
             raw["points"] = [PnLPoint(**p) for p in raw.get("points", [])]
             self.state = PnLTrackerState(**raw)
-            self.state.monitor_risk_usd = monitor_risk_usd
         else:
-            self.state = PnLTrackerState(monitor_risk_usd=monitor_risk_usd)
+            self.state = PnLTrackerState()
             self._save()
 
     def record_closed_trade(
@@ -98,11 +93,15 @@ class BasePnLTracker:
         else:
             t = str(close_time)
 
+        if not source_risk_usd or float(source_risk_usd) <= 0:
+            raise ValueError("source_risk_usd must be a positive trade risk (risk_usd / pp_risk_usd).")
+
+        monitor_risk_usd = float(source_risk_usd)
         monitor_pnl = scale_trade_pnl_to_monitor(
             pnl_usd=pnl_usd,
             pnl_r=pnl_r,
-            source_risk_usd=source_risk_usd,
-            monitor_risk_usd=self.state.monitor_risk_usd,
+            source_risk_usd=monitor_risk_usd,
+            monitor_risk_usd=monitor_risk_usd,
         )
 
         self.state.cumulative_pnl_usd += monitor_pnl
@@ -115,7 +114,7 @@ class BasePnLTracker:
             pnl_usd=round(monitor_pnl, 6),
             cumulative_pnl_usd=round(self.state.cumulative_pnl_usd, 6),
             source_risk_usd=source_risk_usd,
-            monitor_risk_usd=self.state.monitor_risk_usd,
+            monitor_risk_usd=monitor_risk_usd,
             note=note,
         )
         self.state.points.append(point)
@@ -153,25 +152,24 @@ class BasePnLTracker:
         return pd.DataFrame(rows)
 
     @staticmethod
-    def build_curve_from_closed_trades(
-        closed_trades: Sequence,
-        *,
-        monitor_risk_usd: float,
-        source_risk_usd: float,
-    ):
+    def build_curve_from_closed_trades(closed_trades: Sequence, *, cfg) -> "pd.DataFrame":
         """Replay PnL základní z uzavřených obchodů (bez zápisu na disk)."""
         import pandas as pd
+
+        from config.bot_config import trade_risk_usd
 
         rows = []
         cumulative = 0.0
         high = 0.0
         for t in sorted(closed_trades, key=lambda x: x.close_time):
+            is_pp = bool(getattr(t, "is_pp", False))
+            risk = float(
+                getattr(t, "risk_usd", None) or trade_risk_usd(cfg, is_pp=is_pp)
+            )
             monitor_pnl = scale_trade_pnl_to_monitor(
                 pnl_usd=float(getattr(t, "pnl_usd", 0.0)),
-                source_risk_usd=float(
-                    getattr(t, "risk_usd", None) or source_risk_usd or monitor_risk_usd
-                ),
-                monitor_risk_usd=monitor_risk_usd,
+                source_risk_usd=risk,
+                monitor_risk_usd=risk,
             )
             cumulative += monitor_pnl
             if cumulative > high:
@@ -217,15 +215,19 @@ if __name__ == "__main__":
     parser.add_argument("--pnl-usd", type=float)
     parser.add_argument("--source-risk-usd", type=float)
     parser.add_argument("--pnl-r", type=float)
-    parser.add_argument("--monitor-risk-usd", type=float, default=500.0)
+    parser.add_argument("--monitor-risk-usd", type=float)
     parser.add_argument("--state", default="runtime/pnl_base_tracker_state.json")
     args = parser.parse_args()
 
-    tracker = BasePnLTracker(state_path=args.state, monitor_risk_usd=args.monitor_risk_usd)
+    source_risk = args.source_risk_usd or args.monitor_risk_usd
+    if not source_risk:
+        parser.error("Provide --source-risk-usd or --monitor-risk-usd.")
+
+    tracker = BasePnLTracker(state_path=args.state)
     point = tracker.record_closed_trade(
         close_time=args.time,
         pnl_usd=args.pnl_usd,
-        source_risk_usd=args.source_risk_usd,
+        source_risk_usd=source_risk,
         pnl_r=args.pnl_r,
     )
     print(json.dumps(asdict(point), ensure_ascii=False))

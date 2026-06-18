@@ -220,6 +220,11 @@ class BotConfig:
         return TIMEFRAME_LABEL_MAP.get(self.timeframe, f"TF_{int(self.timeframe)}")
 
 
+def trade_risk_usd(cfg: BotConfig, *, is_pp: bool = False) -> float:
+    """Per-trade risk for PnL scaling (WAVE/counter vs PP)."""
+    return float(cfg.pp_risk_usd if is_pp else cfg.risk_usd)
+
+
 # ---------------------------------------------------------------------------
 # LIVE / REGISTRY — presety BotConfig (TREND & BOS)
 # ---------------------------------------------------------------------------
@@ -241,8 +246,7 @@ class BotConfig:
 
 # LIVE_BOT_CONFIG — grid EXAMPLE combo_no 2 (2025-11-10 .. 2026-05-09, w2notpFalse).
 # Runtime engine: resolve_grid_engine_config() — plna simulace (counter/EXT ordery).
-# wave_isolation_study=True: live MT5 = WAVE + counter + EXT counter (engine parita);
-# bez PP/BOS entry/EXT primary (viz runtime/live_wave_isolation.py).
+# wave_isolation_study=True (varianta B): engine plny routing, MT5 jen WAVE; wave_pnl = equity.
 
 LIVE_BOT_CONFIG = BotConfig(
     # ============== MARKET SETTING ==============
