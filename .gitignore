@@ -14,6 +14,10 @@
 !/check_waves.py
 !/check_waves2.py
 !/download_data.py
+!/data/
+!/PROMPT_NAPOJENI_BOTA_NA_GITHUB_TELEMETRY.txt
+!/EURUSD_FXIFY_1_n=4.jsonl
+!/EURUSD_FXIFY_1_n=4_config.jsonl
 
 # ── Výjimky uvnitř povolených cest ──
 .venv/
@@ -29,6 +33,8 @@ mt5_credentials.py
 # Runtime logs
 *.log
 *.jsonl
+!/EURUSD_FXIFY_1_n=4.jsonl
+!/EURUSD_FXIFY_1_n=4_config.jsonl
 
 # Live bot process locks (runtime/instance_lock.py)
 locks/

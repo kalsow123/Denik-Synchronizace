@@ -1,0 +1,324 @@
+================================================================================
+NAPOJENÍ NOVÉHO LIVE BOTA NA GITHUB TELEMETRY (stejně jako XAUUSD_FXIFY_2)
+================================================================================
+
+Tento soubor slouží jako kompletní instrukce pro Cursor. Vlož ho do chatu
+(u přílohy nebo zkopíruj obsah) a doplň proměnné v sekci KONTEXT.
+
+Referenční bot: XAUUSD_FXIFY_2
+Telemetry repo: git@github.com:kalsow123/bot-telemetry.git (branch: main)
+
+
+================================================================================
+KONTEXT — DOPLŇ PŘED SPUŠTĚNÍM
+================================================================================
+
+- BOT_PROJECT_PATH:     <např. C:\Users\Administrator\Desktop\Standa_trading_testing_2\EU50_Trading_BOT_Fintokey_1>
+- BOT_NAME / BOT_ID:    <např. EU50_Fintokey_1>   ← musí být stejné všude
+- TELEMETRY_REPO_PATH:  <např. C:\Users\Administrator\Desktop\bot-telemetry>
+- TELEMETRY_GIT_REMOTE: git@github.com:kalsow123/bot-telemetry.git
+- TARGET_BRANCH:        main
+
+
+================================================================================
+CÍL
+================================================================================
+
+Nastavit nového bota tak, aby:
+1) při běhu generoval lokální JSONL telemetrii ve stejném formátu jako reference bot,
+2) průběžně synchronizoval data do GitHub repozitáře bot-telemetry,
+3) dashboard viděl bota pod logs/<BOT_ID>/live_bot.jsonl a logs/<BOT_ID>/bot_config.jsonl.
+
+
+================================================================================
+ARCHITEKTURA (musíš dodržet)
+================================================================================
+
+Tok dat:
+
+  Bot (main.py)
+    → píše lokálně:  <BOT_NAME>.jsonl + <BOT_NAME>_config.jsonl
+    → autostart:     scripts/sync_live_jsonl_to_github.py (pokud existuje .env.sync)
+
+  Sync skript
+    → kopíruje do:   <TELEMETRY_REPO_PATH>\logs\<BOT_ID>\live_bot.jsonl
+                     <TELEMETRY_REPO_PATH>\logs\<BOT_ID>\bot_config.jsonl
+    → git commit + push → GitHub (bot-telemetry)
+
+  Dashboard
+    → čte z GitHubu složku logs/<BOT_ID>/
+
+
+--- Lokálně (v kořeni projektu bota) ---
+
+Bot při startu (main.py) automaticky vytváří:
+- <BOT_NAME>.jsonl           — append-only live eventy (HEARTBEAT, STATUS, obchody, …)
+- <BOT_NAME>_config.jsonl    — 1 řádek snapshot konfigurace při startu (event: BOT_CONFIG_SNAPSHOT)
+
+Názvy vycházejí z cfg.bot_name v config/bot_config.py:
+
+  safe_bot_name = re.sub(r"[^A-Za-z0-9._-]+", "_", cfg.bot_name).strip("._-") or "bot"
+  json_log_file = f"{safe_bot_name}.jsonl"
+  config_snapshot_file = f"{safe_bot_name}_config.jsonl"
+
+
+--- V telemetry git repu (GitHub) ---
+
+Sync skript scripts/sync_live_jsonl_to_github.py kopíruje:
+- <BOT_NAME>.jsonl           → logs/<BOT_ID>/live_bot.jsonl
+- <BOT_NAME>_config.jsonl    → logs/<BOT_ID>/bot_config.jsonl
+
+BOT_ID v .env.sync MUSÍ být stejné jako bot_name v configu (konvence jako u XAUUSD_FXIFY_2).
+
+Pozn.: Lokální názvy (XAUUSD_FXIFY_2.jsonl) a názvy v gitu (live_bot.jsonl) se liší
+záměrně — sync je přejmenuje podle konvence telemetry repa.
+
+
+--- Autostart syncu ---
+
+Při startu bota (main.py → _start_telemetry_sync) se automaticky spustí sync podproces,
+pokud existuje .env.sync a skript scripts/sync_live_jsonl_to_github.py.
+
+Sync lze vypnout env proměnnou: DISABLE_TELEMETRY_SYNC=1
+
+
+================================================================================
+KROKY K PROVEDENÍ
+================================================================================
+
+1) Ověř strukturu projektu bota
+--------------------------------
+
+V BOT_PROJECT_PATH musí existovat (stejně jako u reference XAUUSD_FXIFY_2):
+- main.py
+- config/bot_config.py
+- core/logging_utils.py
+- scripts/sync_live_jsonl_to_github.py
+- scripts/run_sync_live_jsonl.ps1
+- .env.sync.example
+
+Pokud sync skripty chybí, zkopíruj je z reference projektu XAUUSD_FXIFY_2 beze změny logiky.
+
+
+2) Nastav identitu bota v configu
+---------------------------------
+
+V config/bot_config.py u LIVE_BOT_CONFIG (nebo aktivního configu) nastav:
+- bot_name = "<BOT_NAME>"       ← přesně stejný string jako BOT_ID
+- magic = <unikátní číslo>      ← nesmí kolidovat s jinými boty na stejném MT5
+
+Ověř, že bot_name používá jen znaky [A-Za-z0-9._-] (jinak se sanitizuje).
+
+Doporučený vzor pojmenování: SYMBOL_BROKER_N (např. XAUUSD_FXIFY_2, EU50_Fintokey_1).
+
+
+3) Vytvoř / uprav .env.sync
+---------------------------
+
+Zkopíruj .env.sync.example → .env.sync a vyplň (Windows cesty, absolutní):
+
+  SOURCE_JSONL_PATH=<BOT_PROJECT_PATH>\<BOT_NAME>.jsonl
+  SOURCE_CONFIG_JSONL_PATH=<BOT_PROJECT_PATH>\<BOT_NAME>_config.jsonl
+  TELEMETRY_REPO_PATH=<TELEMETRY_REPO_PATH>
+  BOT_ID=<BOT_NAME>
+  TARGET_BRANCH=main
+  SYNC_INTERVAL_SEC=1
+  SYNC_POLL_SEC=0.5
+  SYNC_CONFIG_JSONL_INTERVAL_SEC=0
+
+Poznámky:
+- SYNC_POLL_SEC=0.5 = kontrola změn každých 0.5 s (rychlý push po novém řádku)
+- SYNC_CONFIG_JSONL_INTERVAL_SEC=0 = config se kontroluje při každém pollu (doporučeno)
+
+
+4) Připrav telemetry git repo na serveru
+----------------------------------------
+
+Pokud TELEMETRY_REPO_PATH neexistuje:
+
+  git clone git@github.com:kalsow123/bot-telemetry.git "<TELEMETRY_REPO_PATH>"
+
+Ověř SSH push:
+
+  cd "<TELEMETRY_REPO_PATH>"
+  git remote -v
+  git pull origin main
+  git status
+
+Pokud push selže → nastav SSH klíč pro GitHub (deploy key nebo user key s write access).
+
+Na jednom serveru stačí JEDEN clone bot-telemetry pro všechny boty.
+Každý bot má vlastní .env.sync s jiným BOT_ID a SOURCE_* cestami.
+
+
+5) Vytvoř cílovou složku v telemetry repu (volitelné — sync ji vytvoří sám)
+----------------------------------------------------------------------------
+
+  New-Item -ItemType Directory -Force -Path "<TELEMETRY_REPO_PATH>\logs\<BOT_ID>"
+
+Finální struktura po prvním syncu:
+
+  logs/<BOT_ID>/live_bot.jsonl
+  logs/<BOT_ID>/bot_config.jsonl
+
+
+6) Ověř generování JSONL (bez gitu)
+-----------------------------------
+
+Spusť bota krátce nebo proveď test sync jednorázově:
+
+  cd "<BOT_PROJECT_PATH>"
+  .\.venv\Scripts\python.exe -m main
+  # nebo pokud .venv neexistuje: python -m main
+  # Ctrl+C po pár sekundách
+
+Zkontroluj, že existují:
+- <BOT_PROJECT_PATH>\<BOT_NAME>.jsonl (obsahuje eventy BOT_START, HEARTBEAT, STATUS, …)
+- <BOT_PROJECT_PATH>\<BOT_NAME>_config.jsonl (1 řádek, event: BOT_CONFIG_SNAPSHOT)
+
+Jednorázový sync test:
+
+  cd "<BOT_PROJECT_PATH>"
+  .\.venv\Scripts\python.exe scripts\sync_live_jsonl_to_github.py --env-file .env.sync --once
+
+Očekávaný výstup: [sync] Pushed: ... nebo tichý průchod pokud nebyla změna.
+
+
+7) Ověř push do GitHubu
+-----------------------
+
+  cd "<TELEMETRY_REPO_PATH>"
+  git log -1 --oneline
+  # očekává se commit: "telemetry: <BOT_ID> update YYYY-MM-DD HH:MM:SS"
+
+  Test-Path "logs\<BOT_ID>\live_bot.jsonl"
+  Test-Path "logs\<BOT_ID>\bot_config.jsonl"
+
+
+8) Ověř autostart syncu při běhu bota
+-------------------------------------
+
+Spusť bota normálně:
+
+  cd "<BOT_PROJECT_PATH>"
+  .\.venv\Scripts\python.exe -m main
+
+V live_bot.log hledej řádek:
+  TELEMETRY_SYNC: spuštěn podproces PID=...
+
+Po ~30 s ověř nový commit v telemetry repu.
+
+
+================================================================================
+FORMÁT DAT (dashboard očekává tento schema)
+================================================================================
+
+--- Live JSONL (<BOT_NAME>.jsonl → live_bot.jsonl) ---
+
+Každý řádek = 1 JSON objekt. Klíčové eventy:
+- BOT_START, BOT_STOP (reason: MANUAL_STOP / CRASH / SHUTDOWN / …)
+- HEARTBEAT (každé ~3 min, pole uptime_sec)
+- STATUS (balance, equity, profit_total, profit_bot, open_positions, pending_orders, …)
+- OLD_WAVES_SUMMARY
+- MT5_DISCONNECTED, MT5_RECONNECTED, MT5_CONNECTION
+- obchodní eventy z trade trackeru (ORDER_*, POSITION_*, TRADE_*)
+- LOG (fallback pro plain log.info)
+
+Povinná pole u strukturovaných eventů (z log_event()):
+  ts_iso, severity, event, bot_id, bot_instance_id, symbol, tf, magic,
+  vps_name, event_id, schema_version
+
+
+--- Config JSONL (<BOT_NAME>_config.jsonl → bot_config.jsonl) ---
+
+Přesně 1 řádek při startu:
+
+  {
+    "ts_iso": "...",
+    "event": "BOT_CONFIG_SNAPSHOT",
+    "bot_name": "<BOT_NAME>",
+    "magic": ...,
+    "symbol": "...",
+    "timeframe": "M30",
+    "settings": { ... celý BotConfig ... }
+  }
+
+
+================================================================================
+CHECKLIST PO DOKONČENÍ
+================================================================================
+
+[ ] bot_name v config/bot_config.py == BOT_ID v .env.sync
+[ ] magic je unikátní oproti ostatním botům
+[ ] .env.sync existuje s absolutními cestami pro daný server
+[ ] TELEMETRY_REPO_PATH je git clone s funkčním SSH pushem
+[ ] Lokální <BOT_NAME>.jsonl a <BOT_NAME>_config.jsonl se vytváří při startu
+[ ] sync_live_jsonl_to_github.py --once úspěšně pushne
+[ ] V GitHub repu bot-telemetry existuje logs/<BOT_ID>/live_bot.jsonl
+[ ] V GitHub repu existuje logs/<BOT_ID>/bot_config.jsonl
+[ ] Při běhu bota se v logu objeví TELEMETRY_SYNC: spuštěn podproces
+[ ] Dashboard zobrazuje nového bota (po refresh / dalším pullu dat)
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Problém                              | Řešení
+-------------------------------------|-----------------------------------------------
+TELEMETRY_SYNC: .env.sync chybí       | Vytvoř .env.sync z .env.sync.example
+git push selhal                      | SSH klíč, git pull, konflikty v telemetry repu
+JSONL se nevytváří                   | Bot neběží / chyba MT5 connect / špatný bot_name
+Push proběhne, dashboard nevidí bota | BOT_ID nesedí se jménem složky v logs/
+Duplicitní instance                  | Lock .locks/<bot>_<magic>.lock — ukonči starý proces
+Sync neběží na pozadí                | Spusť ručně: .\scripts\run_sync_live_jsonl.ps1
+
+
+================================================================================
+DŮLEŽITÉ OMEZENÍ
+================================================================================
+
+- *.jsonl soubory jsou v .gitignore bota — do gitu bota se necommitují, jen do bot-telemetry.
+- .env.sync drž lokálně na serveru (obsahuje cesty, necommitovat do veřejného repa bota).
+- NESMÍŠ měnit cílové názvy v telemetry repu — dashboard očekává vždy live_bot.jsonl
+  a bot_config.jsonl (NE <BOT_NAME>.jsonl v gitu).
+- Každý bot = vlastní složka logs/<BOT_ID>/ v repu bot-telemetry.
+- Starší ruční setup (např. EU50_Fintokey_1.jsonl místo live_bot.jsonl v gitu) nepoužívej —
+  vždy používej sync skript.
+
+
+================================================================================
+REFERENCE — FUNGUJÍCÍ XAUUSD_FXIFY_2
+================================================================================
+
+Lokální .env.sync:
+
+  SOURCE_JSONL_PATH=C:\Users\Administrator\Desktop\Standa_trading_testing_2\XAUUSD_Trading_BOT_FXIFY_2\XAUUSD_FXIFY_2.jsonl
+  SOURCE_CONFIG_JSONL_PATH=C:\Users\Administrator\Desktop\Standa_trading_testing_2\XAUUSD_Trading_BOT_FXIFY_2\XAUUSD_FXIFY_2_config.jsonl
+  TELEMETRY_REPO_PATH=C:\Users\Administrator\Desktop\bot-telemetry
+  BOT_ID=XAUUSD_FXIFY_2
+
+GitHub cíl:
+
+  logs/XAUUSD_FXIFY_2/live_bot.jsonl
+  logs/XAUUSD_FXIFY_2/bot_config.jsonl
+
+config/bot_config.py:
+
+  bot_name = "XAUUSD_FXIFY_2"
+  magic = 200_002
+
+
+================================================================================
+ÚKOL PRO CURSOR
+================================================================================
+
+Proveď všechny kroky výše pro bota s hodnotami z sekce KONTEXT.
+Ověř funkčnost příkazy v PowerShellu.
+Na závěr napiš stručný report:
+- co bylo vytvořeno/změněno,
+- výstup test syncu (--once),
+- poslední git commit v telemetry repu,
+- potvrzení že dashboard uvidí bota pod logs/<BOT_ID>/.
+
+================================================================================
