@@ -27,6 +27,7 @@ from strategy.ext_logic import (
     is_ext_block_trade_on_parent_wave,
     is_ext_wave,
     is_ext_wave_pending_comment,
+    is_trade_within_parent_ext_window,
 )
 from strategy.trend_bos import TrendState, entry_allowed_at_fill_bar, resolve_effective_tp
 from strategy.ext_range import pending_protected_from_bos_direction_cancel_by_comment

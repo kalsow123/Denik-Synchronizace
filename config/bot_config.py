@@ -250,7 +250,7 @@ def trade_risk_usd(cfg: BotConfig, *, is_pp: bool = False) -> float:
 
 LIVE_BOT_CONFIG = BotConfig(
     # ============== MARKET SETTING ==============
-    symbol="EURUSD",  #L
+    symbol="EURUSD.x",  #L broker suffix (FXPIG)
     timeframe=mt5.TIMEFRAME_M30,
     wave_min_pct=0.26,
     wave_session_filter_enabled=False,
@@ -279,10 +279,10 @@ LIVE_BOT_CONFIG = BotConfig(
     max_wave_age_hours=20,
 
     # ============== RISK MANAGEMENT ==============
-    risk_usd=500.0,
-    pp_risk_usd=500.0,
+    risk_usd=300.0,
+    pp_risk_usd=300.0,
     contract_size=100_000.0,  #L backtest; live lot z MT5
-    magic=100_001,
+    magic=100_100,
 
     # ============== WAVE & PP ==============
     wave_min_sl=0.12,
@@ -324,13 +324,15 @@ LIVE_BOT_CONFIG = BotConfig(
     ext_close_trend_positions_on_bos=True,
 
     # ============== OTHERS ==============
-    bot_name="LIVE_EURUSD_M30_v1",  #L
+    bot_name="EURUSD_FXIFY_1_n=4",  #L telemetry BOT_ID == bot_name
+    heartbeat_interval_sec=180,  #L HEARTBEAT do jsonl kazde 3 min
+    jsonl_retention_days=2,  #L jsonl: smazat radky starsi nez 2 dny (i sync do gitu)
     startup_bars=1440,  #L ~1 mesic zpetne z MT5 (M30: 30*48)
     dynamic_risk_enabled=False,  #L
     risk_pct_of_equity=0.5,  #L
     live_position_cap_mode="off",  #L
     live_max_open_positions=None,  #L
-    equity_target_usd=None,  #L
+    equity_target_usd=52_020.0,  #L profit target — zavře pozice a vypne bota
 
     # ============== TIME RESET ==============
     session_enabled=True,  #L vypnout/zapnout bot podle casu (session_manager + live_loop)
@@ -358,7 +360,7 @@ LIVE_BOT_CONFIG = BotConfig(
     adx14_bos_confirm_calendar_weeks=2,  #L platí jen pri adx14_bos_confirm_enabled=True
     adx14_gate_state_path="runtime/adx14_equity_gate_state.json",  #L
     adx14_gate_jsonl_path="runtime/adx14_equity_gate.jsonl",  #L
-    pnl_base_tracker_risk_usd=500.0,  #L
+    pnl_base_tracker_risk_usd=300.0,  #L
     pnl_base_tracker_state_path="runtime/pnl_base_tracker_state.json",  #L
     pnl_base_tracker_jsonl_path="runtime/pnl_base_tracker.jsonl",  #L
     pnl_base_tracker_csv_path="runtime/pnl_base_curve.csv",  #L

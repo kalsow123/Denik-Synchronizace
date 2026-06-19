@@ -13,6 +13,7 @@ import socket
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from config.bot_config import BotConfig
 
@@ -108,19 +109,23 @@ def _parse_ts_iso(ts: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def prune_jsonl_history(json_file: str, retention_days: int | float | None) -> None:
+def prune_jsonl_history(json_file: str, retention_days: int | float | None) -> bool:
     """
     Ponecha v jsonl jen radky s ts_iso >= now - retention_days.
     - Pokud retention_days <= 0 nebo None, pruning se neprovadi.
     - Radky bez validniho ts_iso ponechavame (bezpecny fallback).
+    Vraci True, pokud se soubor na disku zmenil.
     """
     if retention_days is None or retention_days <= 0:
-        return
+        return False
     if not os.path.exists(json_file):
-        return
+        return False
 
+    before_size = os.path.getsize(json_file)
     cutoff = datetime.now(timezone.utc) - timedelta(days=float(retention_days))
     temp_file = f"{json_file}.tmp"
+    kept = 0
+    dropped = 0
 
     with open(json_file, "r", encoding="utf-8") as src, open(temp_file, "w", encoding="utf-8") as dst:
         for line in src:
@@ -132,22 +137,87 @@ def prune_jsonl_history(json_file: str, retention_days: int | float | None) -> N
             except json.JSONDecodeError:
                 # Nevalidni radek neriskujeme ztratit.
                 dst.write(line)
+                kept += 1
                 continue
 
             ts = _parse_ts_iso(payload.get("ts_iso"))
             if ts is None or ts >= cutoff:
                 dst.write(line)
+                kept += 1
+            else:
+                dropped += 1
+
+    if dropped <= 0:
+        try:
+            os.remove(temp_file)
+        except OSError:
+            pass
+        return False
 
     os.replace(temp_file, json_file)
+    return os.path.getsize(json_file) != before_size or dropped > 0
 
 
-def write_bot_config_snapshot_jsonl(cfg: BotConfig, output_file: str) -> None:
-    """
-    Zapise 1 radek JSONL se zakladni konfiguraci bota.
-    Soubor se prepise pri startu (neappenduje), behem runu se uz nemeni.
-    """
+def reopen_json_log_handler(json_file: str) -> None:
+    """Po prune/replace jsonl znovu otevře JSON FileHandler (append na aktuální soubor)."""
+    abs_path = os.path.abspath(json_file)
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if not isinstance(handler, logging.FileHandler):
+            continue
+        if os.path.abspath(getattr(handler, "baseFilename", "")) != abs_path:
+            continue
+        root.removeHandler(handler)
+        try:
+            handler.flush()
+            handler.close()
+        except Exception:
+            pass
+
+    file_json = logging.FileHandler(json_file, encoding="utf-8")
+    file_json.setFormatter(JsonFormatter())
+    file_json.setLevel(logging.INFO)
+    file_json.addFilter(_LogTargetFilter(LOG_TARGET_FILE_JSON))
+    root.addHandler(file_json)
+
+
+def maybe_prune_jsonl_runtime(json_file: str, retention_days: int | float | None) -> bool:
+    """Prune starých řádků za běhu; po změně souboru reopen JSON handler."""
+    try:
+        changed = prune_jsonl_history(json_file=json_file, retention_days=retention_days)
+    except Exception:
+        return False
+    if changed:
+        reopen_json_log_handler(json_file)
+    return changed
+
+
+def _config_snapshot_settings(cfg: BotConfig) -> dict:
     config_dict = asdict(cfg)
     config_dict["timeframe_label"] = cfg.timeframe_label
+    return config_dict
+
+
+def write_bot_config_snapshot_jsonl(cfg: BotConfig, output_file: str) -> bool:
+    """
+    Zapise 1 radek JSONL se zakladni konfiguraci bota.
+    Prepise soubor jen kdyz se settings oproti poslednimu snapshotu zmenily.
+    Vraci True, pokud byl soubor zapsan / aktualizovan.
+    """
+    settings = _config_snapshot_settings(cfg)
+    settings_blob = json.dumps(settings, ensure_ascii=False, default=str, sort_keys=True)
+    if os.path.exists(output_file):
+        try:
+            last_line = Path(output_file).read_text(encoding="utf-8").strip().splitlines()[-1]
+            prev = json.loads(last_line)
+            prev_settings = prev.get("settings")
+            if prev_settings is not None:
+                prev_blob = json.dumps(prev_settings, ensure_ascii=False, default=str, sort_keys=True)
+                if prev_blob == settings_blob:
+                    return False
+        except (OSError, IndexError, json.JSONDecodeError, TypeError):
+            pass
+
     payload = {
         "ts_iso": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "event": "BOT_CONFIG_SNAPSHOT",
@@ -155,10 +225,11 @@ def write_bot_config_snapshot_jsonl(cfg: BotConfig, output_file: str) -> None:
         "magic": cfg.magic,
         "symbol": cfg.symbol,
         "timeframe": cfg.timeframe_label,
-        "settings": config_dict,
+        "settings": settings,
     }
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    return True
 
 
 def setup_logging(

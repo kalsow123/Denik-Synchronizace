@@ -14,6 +14,7 @@ from core.logging_utils import (
     LOG_TARGETS_JSONL_ONLY,
     LOG_TARGETS_TEXT_SINKS,
     log_event,
+    maybe_prune_jsonl_runtime,
 )
 from core.signal_keys import get_signal_key
 from infra.account import get_account_snapshot
@@ -893,7 +894,7 @@ def _maybe_place_live_counter_from_tp(
     )
 
 
-def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
+def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str | None = None) -> None:
     from runtime.live_wave_isolation import (
         log_live_execution_mode,
         resolve_live_execution_config,
@@ -995,6 +996,11 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                 uptime_sec=int(time.time() - bot_start_ts),
             )
             last_heartbeat_time = now_local
+            if json_log_file:
+                maybe_prune_jsonl_runtime(
+                    json_log_file,
+                    getattr(cfg, "jsonl_retention_days", None),
+                )
 
         text_status_due = (
             cfg.status_log_text_hours > 0
@@ -2357,6 +2363,17 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str]) -> None:
                         f"NOVA VLNA | {'BUY' if wave_order['dir'] == 1 else 'SELL'} "
                         f"EP={wave_order['fib50']:.5f} SL={wave_order['sl']:.5f} "
                         f"TP={wave_order['tp']:.5f} | Wave {wave_order['move_pct']:.2f}% | {wt}"
+                    )
+                    log_event(
+                        cfg,
+                        "info",
+                        "WAVE_DEFINED",
+                        wave_id=str(wt),
+                        side="BUY" if int(wave_order["dir"]) == 1 else "SELL",
+                        move_pct=float(wave_order.get("move_pct", 0.0)),
+                        entry_price=float(wave_order["fib50"]),
+                        sl=float(wave_order["sl"]),
+                        tp=float(wave_order["tp"]) if wave_order.get("tp") is not None else None,
                     )
 
                     placed_meta: Dict[str, Any] = {}

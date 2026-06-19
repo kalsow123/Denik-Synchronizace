@@ -19,7 +19,7 @@ class LiveInstanceAlreadyRunning(RuntimeError):
 
 
 def _lock_path(cfg: BotConfig) -> Path:
-    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", cfg.bot_name).strip("._-") or "bot"
+    safe_name = re.sub(r"[^A-Za-z0-9._=-]+", "_", cfg.bot_name).strip("._-") or "bot"
     symbol = re.sub(r"[^A-Za-z0-9._-]+", "_", str(cfg.symbol)).strip("._-") or "sym"
     return Path("locks") / f"{safe_name}_{symbol}_{int(cfg.magic)}.lock"
 
