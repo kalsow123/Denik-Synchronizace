@@ -1,0 +1,98 @@
+Settings bota — combo_no 6
+Zdroj: grid_report.xlsx (profil EXAMPLE M30, okno 2025-05-10 → 2025-11-09)
+
+=== IDENTIFIKACE ===
+combo_no: 6
+bot_name: M30_w0.26_o3_r2.5_f0.55_mkt_df20250510_dt20251109_tpmwave_target_n_tp_target_wave_index8_wave_extension_pct0.1_bos_entry_in_rrr_fixedTrue_w2notpi2_symbolEURUSD_sf0.8_afxshift_sl_wpTrue_exp3_extexp7_pcmtrend_pcad7_mxw1_max_wave_age_hours20_risk_usd500.0_contract_size100000.0_magic100001_spread0.0001_slippage0.0_wave_positions_onlyTrue_wave_isolation_studyTrue_wave_counter_two_sided_enabledTrue_skip_primary_entry_on_parent_wave_enableTrue_wf_enabledTrue_tdirTrue_thhlTrue_wave_size_sl_ladder_step_pct0.16_ext_enabledTrue_ext_secondary_enabledFalse_ext_weekend_gap_relax_factor0.76_ext_counter_enabledTrue_extct2300_ext_trade_both_sides_in_rangeTrue_wave_min_pct_enableTrue_ext_post_both_sides_wave_min_pct0.35_ext_post_both_sides_default_sl_pct0.1_ext_close_trend_positions_on_bosTrue_wave_allowed_sessionsNone_wave_custom_windowNone_track_concurrent_positionsTrue_pcapoff_mpNone_NOFILT
+symbol: EURUSD
+timeframe: M30
+date_from: 2025-05-10
+date_to: 2025-11-09
+
+=== VLNA / VSTUP / TP ===
+wave_min_pct: 0.26
+min_opp_bars: 3
+rrr: 2.5
+fib_level: 0.55
+entry_mode: market_fallback
+sl_fib_level: 0.8
+abort_fib_level: shift_sl
+wave_plus: True
+tp_mode: wave_target_n
+tp_target_wave_index: 8
+wave_extension_pct: 0.1
+wave_2_no_tp_enable: False
+wave_2_no_tp_max_index: 2
+bos_entry_enable: False
+bos_entry_in_rrr_fixed: True
+
+=== EXPIRACE / PENDING ===
+order_expiry_days: 3
+ext_order_expiry_days: 7
+pending_cancel_mode: trend
+pending_cancel_after_days: 7
+wave_max_pct: 1
+max_wave_age_hours: 20
+
+=== WAVE POZICE ===
+wave_position_enabled: True
+wave_positions_only: True
+wave_isolation_study: True
+wave_counter_two_sided_enabled: True
+two_sided_entry_min_wave_pct: 0.55
+skip_primary_entry_on_parent_wave_enable: True
+wave_min_sl: 0.12
+wave_size_sl_ladder_base_pct: 0.21
+wave_size_sl_ladder_step_pct: 0.16
+wave_size_sl_ladder_band_size_pct: 0.5
+wave_min_pct_enable: True
+wave_allowed_sessions: None
+wave_custom_window: None
+
+=== PP ===
+pp_enabled: False
+pp_sl_pct: 0.21
+pp_risk_usd: 500
+pp_disabled_in_ext_context: True
+
+=== TREND / FILTRY ===
+trend_filter_enabled: True
+trend_hh_hl_filter_enabled: True
+wf_enabled: True
+adx14_change_enabled: False
+adx14_equity_gate_enabled: False
+pnl_base_tracker_enabled: False
+
+=== EXT ===
+ext_enabled: True
+ext_wave_min_pct: 0.76
+ext_secondary_enabled: False
+ext_weekend_gap_relax_factor: 0.76
+ext_counter_enabled: True
+ext_counter_time: 23:00
+ext_counter_min_sl_enabled: True
+ext_counter_min_sl_pct: 0.16
+ext_trade_both_sides_in_range: True
+ext_post_both_sides_wave_min_pct: 0.35
+ext_post_both_sides_default_sl_pct: 0.1
+ext_close_trend_positions_on_bos: True
+
+=== BACKTEST / BROKER ===
+risk_usd: 500.0
+contract_size: 100000.0
+magic: 100001
+spread: 0.0001
+slippage: 0.0
+track_concurrent_positions: True
+backtest_position_cap_mode: off
+backtest_max_open_positions: None
+
+=== PROP FIRM (grid běh) ===
+prop_firms_enabled: True
+prop_firms_presets: FTMO
+prop_firms_account_size_usd: 100000
+prop_firms_generate_html: False
+
+=== POZNÁMKA ===
+Combo 6 v prvním bloku EXAMPLE: tp_target_wave_index=8, wave_2_no_tp_enable=False,
+wave_positions_only=True, wave_isolation_study=True.
