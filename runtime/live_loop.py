@@ -44,6 +44,7 @@ from infra.orders import (
 from core.risk import calc_lot, round_to_step
 from infra.session_manager import (
     get_broker_now,
+    get_session_now,
     is_session_enabled,
     is_in_session,
     is_pre_close_buffer,
@@ -1001,6 +1002,12 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                     json_log_file,
                     getattr(cfg, "jsonl_retention_days", None),
                 )
+            try:
+                from infra.telemetry_sync import ensure_telemetry_sync_running
+
+                ensure_telemetry_sync_running(log, cfg)
+            except Exception:
+                pass
 
         text_status_due = (
             cfg.status_log_text_hours > 0
@@ -1104,22 +1111,24 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
 
     while True:
         try:
-            now = get_broker_now(cfg)
+            broker_now = get_broker_now(cfg)
 
             # ───── SESSION MANAGER ─────────────────────────
             if is_session_enabled(cfg):
-                in_session = is_in_session(cfg, now)
+                session_now = get_session_now(cfg)
+                in_session = is_in_session(cfg, session_now)
 
                 # 1) Pre-close buffer - zrusit pendingy (jen jednou za den)
-                if is_pre_close_buffer(cfg, now):
-                    today_key = now.date()
+                if is_pre_close_buffer(cfg, session_now):
+                    today_key = session_now.date()
                     if last_pre_close_date != today_key:
                         log_event(
                             cfg,
                             "info",
                             "SESSION_PRE_CLOSE",
-                            time=now.strftime("%H:%M:%S"),
+                            time=session_now.strftime("%H:%M:%S"),
                             buffer_min=cfg.session_pre_close_buffer_min,
+                            session_timezone=getattr(cfg, "session_timezone", "broker"),
                         )
                         from infra.pending_snapshot import (
                             capture_pending_snapshot,
@@ -1130,7 +1139,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
 
                         # V patek volitelne zavreme i pozice
                         if (cfg.session_close_positions_on_friday
-                                and is_week_close_pre_buffer(cfg, now)):
+                                and is_week_close_pre_buffer(cfg, session_now)):
                             log_event(cfg, "info", "SESSION_WEEK_CLOSE_POSITIONS")
                             close_all_positions(cfg)
 
@@ -1139,21 +1148,22 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                 # 2) Mimo session - usnout do open
                 if not in_session:
                     if not was_outside_session:
-                        secs = seconds_until_open(cfg, now)
-                        wake_at = now + timedelta(seconds=secs)
+                        secs = seconds_until_open(cfg, session_now)
+                        wake_at = session_now + timedelta(seconds=secs)
                         log_event(
                             cfg,
                             "info",
                             "SESSION_SLEEP",
-                            now=now.strftime("%Y-%m-%d %H:%M:%S"),
+                            now=session_now.strftime("%Y-%m-%d %H:%M:%S"),
                             wake_at=wake_at.strftime("%Y-%m-%d %H:%M:%S"),
                             seconds_to_wake=int(secs),
+                            session_timezone=getattr(cfg, "session_timezone", "broker"),
                         )
                         was_outside_session = True
 
                     # Chytry sleep: spi az do open (max 60s pro pripad ze user
                     # zmeni system clock nebo neco)
-                    secs = seconds_until_open(cfg, now)
+                    secs = seconds_until_open(cfg, session_now)
                     sleep_for = min(60.0, max(1.0, secs))
                     time.sleep(sleep_for)
                     continue
@@ -1164,7 +1174,8 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                         cfg,
                         "info",
                         "SESSION_WAKE_UP",
-                        time=now.strftime("%Y-%m-%d %H:%M:%S"),
+                        time=session_now.strftime("%Y-%m-%d %H:%M:%S"),
+                        session_timezone=getattr(cfg, "session_timezone", "broker"),
                     )
                     was_outside_session = False
                     # Po wake-up spustime startup recovery, abychom obnovili
@@ -1252,9 +1263,9 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
 
             if adx14_runtime.active and adx14_runtime.needs_history_bars():
                 adx14_df = get_bars(cfg, int(getattr(cfg, "adx14_history_bars", 5000)))
-                adx14_runtime.update(adx14_df if adx14_df is not None else df, now)
+                adx14_runtime.update(adx14_df if adx14_df is not None else df, broker_now)
             elif adx14_runtime.active:
-                adx14_runtime.update(df, now)
+                adx14_runtime.update(df, broker_now)
 
             entries_allowed = adx14_runtime.entries_allowed
 
@@ -1852,6 +1863,10 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
 
             # MT5 reconnect detekce + replay fronty nepodarenych signalu.
             mt5_connected_now = bool(mt5.terminal_info()) and bool(mt5.account_info())
+            if mt5_connected_now:
+                from infra.mt5_client import enforce_mt5_session
+
+                enforce_mt5_session(cfg)
             if mt5_connected_now and not was_mt5_connected:
                 log_event(cfg, "info", "MT5_CONNECTION", status="RECONNECTED")
                 from runtime.wave_target_n_live import reset_wave_target_n_runtime_state

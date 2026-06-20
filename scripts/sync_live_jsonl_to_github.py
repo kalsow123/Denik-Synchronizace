@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+import atexit
 from pathlib import Path
 
 
@@ -39,12 +40,28 @@ def _run_git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+def _recover_stuck_git_rebase(repo: Path) -> None:
+    """Uvolni telemetry repo zaseknute v rebase (typicky pri vice sync procesech najednou)."""
+    git_dir = repo / ".git"
+    for name in ("rebase-merge", "rebase-apply"):
+        marker = git_dir / name
+        if not marker.exists():
+            continue
+        abort = _run_git(repo, "rebase", "--abort")
+        if abort.returncode != 0:
+            import shutil
+
+            shutil.rmtree(marker, ignore_errors=True)
+        print(f"[sync] Git rebase obnoven (uvolnen {name})")
+
+
 def _ensure_git_repo(repo: Path, branch: str) -> None:
     if not repo.exists():
         raise FileNotFoundError(f"TELEMETRY_REPO_PATH neexistuje: {repo}")
     chk = _run_git(repo, "rev-parse", "--is-inside-work-tree")
     if chk.returncode != 0:
         raise RuntimeError(f"Cesta neni git repozitar: {repo}\n{chk.stderr.strip()}")
+    _recover_stuck_git_rebase(repo)
     _run_git(repo, "checkout", branch)
 
 
@@ -56,6 +73,19 @@ def _copy_if_changed(src: Path, dst: Path) -> bool:
         return False
     shutil.copy2(src, dst)
     return True
+
+
+def _pull_rebase(repo: Path, branch: str) -> None:
+    _recover_stuck_git_rebase(repo)
+    fetch = _run_git(repo, "fetch", "origin", branch)
+    if fetch.returncode != 0:
+        raise RuntimeError(f"git fetch selhal:\n{fetch.stderr.strip()}")
+    pull = _run_git(repo, "pull", "--rebase", "origin", branch)
+    if pull.returncode != 0:
+        _recover_stuck_git_rebase(repo)
+        pull = _run_git(repo, "pull", "--rebase", "origin", branch)
+        if pull.returncode != 0:
+            raise RuntimeError(f"git pull --rebase selhal:\n{pull.stderr.strip()}")
 
 
 def _commit_and_push(repo: Path, files_rel: list[str], branch: str, bot_id: str) -> bool:
@@ -77,17 +107,42 @@ def _commit_and_push(repo: Path, files_rel: list[str], branch: str, bot_id: str)
 
     push = _run_git(repo, "push", "origin", branch)
     if push.returncode != 0:
-        pull = _run_git(repo, "pull", "--rebase", "origin", branch)
-        if pull.returncode != 0:
-            raise RuntimeError(
-                "git push selhal a pull --rebase taky:\n"
-                f"push:\n{push.stderr.strip()}\n"
-                f"pull:\n{pull.stderr.strip()}"
-            )
+        _pull_rebase(repo, branch)
         push = _run_git(repo, "push", "origin", branch)
         if push.returncode != 0:
             raise RuntimeError(f"git push selhal po rebase:\n{push.stderr.strip()}")
     return True
+
+
+def _acquire_sync_lock(lock_path: Path) -> bool:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode("ascii"))
+            os.close(fd)
+            atexit.register(lambda: lock_path.unlink(missing_ok=True))
+            return True
+        except FileExistsError:
+            try:
+                pid = int(lock_path.read_text(encoding="ascii").strip())
+            except (OSError, ValueError):
+                pid = -1
+            if pid > 0:
+                alive = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", f"Get-Process -Id {pid} -ErrorAction SilentlyContinue"],
+                    capture_output=True,
+                    check=False,
+                )
+                if alive.returncode == 0:
+                    print(f"[sync] Jiny sync proces uz bezi (PID {pid}), koncim.")
+                    return False
+            try:
+                lock_path.unlink(missing_ok=True)
+            except OSError:
+                print(f"[sync] Nelze ziskat lock: {lock_path}")
+                return False
+    return False
 
 
 def main() -> int:
@@ -143,6 +198,10 @@ def main() -> int:
     except Exception as exc:
         print(f"Init chyba: {exc}")
         return 3
+
+    lock_path = Path(args.env_file).resolve().parent / "locks" / "telemetry_sync.lock"
+    if not _acquire_sync_lock(lock_path):
+        return 0
 
     for src, rel_target in sources:
         print(f"[sync] Source: {src}")

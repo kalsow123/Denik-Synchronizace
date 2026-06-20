@@ -7,18 +7,21 @@ Resi off/on cyklus podle session casu:
   - V open case se probudi a spusti startup recovery.
 
 LIVE ONLY - backtester tento modul ignoruje.
-Casy jsou v BROKER TIME (MT5 tick -> datetime.fromtimestamp).
 
-Kdyz je session_weekdays_only=True, mezi tydennim zavrenim a otevrenim bot spi:
-  - session_week_close_weekday + session_week_close_time (napr. patek 21:00)
-  - session_week_open_weekday + session_week_open_time (napr. nedele 23:00 nebo pondeli 02:00)
-  Pouzijte stejny cas jako session_open_time / session_close_time, pokud chcete chovani jako drive.
+Cas pro session okna (`session_open_time`, `session_close_time`, …):
+  - `session_timezone="broker"` — stejny okamzik jako MT5 tick (UTC instant, legacy)
+  - `UTC+3` / `GMT+3` — fixni offset bez letniho casu
+  - jinak IANA zona, napr. `Europe/Prague`
+
+Strategie, bary a zbytek live logiky dale pouzivaji `get_broker_now()` (MT5).
 """
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, time, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import MetaTrader5 as mt5
 
@@ -80,8 +83,8 @@ def is_session_enabled(cfg: BotConfig) -> bool:
 
 def get_broker_now(cfg: BotConfig) -> datetime:
     """
-    Vrati aktualni broker time podle MT5 ticku.
-    Fallback je UTC cas, pokud MT5 zatim nevrati tick.
+    Vrati aktualni cas podle MT5 ticku (UTC instant).
+    Pouziva strategie, heartbeat intervaly a dalsi live logiku mimo session manager.
     """
     try:
         tick = mt5.symbol_info_tick(cfg.symbol)
@@ -90,6 +93,49 @@ def get_broker_now(cfg: BotConfig) -> datetime:
     except Exception:
         pass
     return datetime.now(timezone.utc)
+
+
+def _session_timezone_name(cfg: BotConfig) -> str | None:
+    tz = str(getattr(cfg, "session_timezone", "broker") or "broker").strip()
+    if not tz or tz.lower() == "broker":
+        return None
+    return tz
+
+
+def _session_tzinfo(cfg: BotConfig):
+    tz_name = _session_timezone_name(cfg)
+    if tz_name is None:
+        return timezone.utc
+    fixed = re.fullmatch(r"(?:UTC|GMT)\s*([+-])\s*(\d{1,2})", tz_name, re.IGNORECASE)
+    if fixed:
+        sign = 1 if fixed.group(1) == "+" else -1
+        hours = int(fixed.group(2))
+        return timezone(timedelta(hours=sign * hours))
+    return ZoneInfo(tz_name)
+
+
+def get_session_now(cfg: BotConfig) -> datetime:
+    """
+    Cas pro session on/off okna.
+    Broker mode = UTC instant z MT5; jinak prevod do `session_timezone`.
+    """
+    broker = get_broker_now(cfg)
+    if _session_timezone_name(cfg) is None:
+        return broker
+    return broker.astimezone(_session_tzinfo(cfg))
+
+
+def _resolve_session_now(cfg: BotConfig, now: Optional[datetime]) -> datetime:
+    if now is None:
+        return get_session_now(cfg)
+    if _session_timezone_name(cfg) is None:
+        if now.tzinfo is None:
+            return now.replace(tzinfo=timezone.utc)
+        return now.astimezone(timezone.utc)
+    session_tz = _session_tzinfo(cfg)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=session_tz)
+    return now.astimezone(session_tz)
 
 
 def _daily_session_active(cfg: BotConfig, now: datetime) -> bool:
@@ -112,7 +158,9 @@ def is_in_session(cfg: BotConfig, now: Optional[datetime] = None) -> bool:
         return True
 
     if now is None:
-        now = get_broker_now(cfg)
+        now = _resolve_session_now(cfg, None)
+    else:
+        now = _resolve_session_now(cfg, now)
 
     if cfg.session_weekdays_only and _in_weekly_break(cfg, now):
         return False
@@ -130,7 +178,9 @@ def is_pre_close_buffer(cfg: BotConfig, now: Optional[datetime] = None) -> bool:
         return False
 
     if now is None:
-        now = get_broker_now(cfg)
+        now = _resolve_session_now(cfg, None)
+    else:
+        now = _resolve_session_now(cfg, now)
 
     if cfg.session_weekdays_only and _in_weekly_break(cfg, now):
         return False
@@ -155,7 +205,9 @@ def seconds_until_open(cfg: BotConfig, now: Optional[datetime] = None) -> float:
     Pouziva diskretni kandidaty (tydenni open + denni open) a overuje pres is_in_session.
     """
     if now is None:
-        now = get_broker_now(cfg)
+        now = _resolve_session_now(cfg, None)
+    else:
+        now = _resolve_session_now(cfg, now)
 
     if not is_session_enabled(cfg):
         return 0.0
@@ -189,7 +241,9 @@ def is_week_close_pre_buffer(cfg: BotConfig, now: Optional[datetime] = None) -> 
     Pro session_close_positions_on_friday / zavreni pozic pred tydennim zavrenim.
     """
     if now is None:
-        now = get_broker_now(cfg)
+        now = _resolve_session_now(cfg, None)
+    else:
+        now = _resolve_session_now(cfg, now)
     if now.weekday() != int(cfg.session_week_close_weekday):
         return False
     close_t = _parse_hhmm(cfg.session_week_close_time)

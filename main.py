@@ -3,7 +3,6 @@
 import atexit
 import os
 import signal
-import subprocess
 import sys
 import re
 import argparse
@@ -18,61 +17,11 @@ from core.logging_utils import (
     write_bot_config_snapshot_jsonl,
 )
 from infra.mt5_client import connect, shutdown
+from infra.telemetry_sync import ensure_telemetry_sync_running, stop_telemetry_sync
 from infra.session_manager import is_session_enabled, is_in_session, get_broker_now
 from runtime.instance_lock import LiveInstanceAlreadyRunning, ensure_single_live_instance
 from runtime.live_loop import run_live_loop
 ACTIVE_CFG = LIVE_BOT_CONFIG
-
-_telemetry_sync_proc: subprocess.Popen | None = None
-_telemetry_sync_atexit_registered: bool = False
-
-
-def _stop_telemetry_sync() -> None:
-    global _telemetry_sync_proc
-    if _telemetry_sync_proc is None:
-        return
-    if _telemetry_sync_proc.poll() is None:
-        _telemetry_sync_proc.terminate()
-        try:
-            _telemetry_sync_proc.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            _telemetry_sync_proc.kill()
-    _telemetry_sync_proc = None
-
-
-def _start_telemetry_sync(log) -> None:
-    """Spustí smyčku push do telemetry repa, pokud existuje .env.sync a skript."""
-    global _telemetry_sync_proc, _telemetry_sync_atexit_registered
-    if os.environ.get("DISABLE_TELEMETRY_SYNC", "").strip() in ("1", "true", "yes"):
-        log.info("TELEMETRY_SYNC: vypnuto (DISABLE_TELEMETRY_SYNC)")
-        return
-    root = Path(__file__).resolve().parent
-    env_file = root / ".env.sync"
-    script = root / "scripts" / "sync_live_jsonl_to_github.py"
-    if not env_file.is_file():
-        log.info("TELEMETRY_SYNC: .env.sync chybí — autostart přeskočen")
-        return
-    if not script.is_file():
-        log.warning("TELEMETRY_SYNC: scripts/sync_live_jsonl_to_github.py nenalezen")
-        return
-    if _telemetry_sync_proc is not None and _telemetry_sync_proc.poll() is None:
-        return
-    popen_kw: dict = {
-        "args": [sys.executable, "-u", str(script)],
-        "cwd": str(root),
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-    }
-    if sys.platform == "win32":
-        popen_kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    try:
-        _telemetry_sync_proc = subprocess.Popen(**popen_kw)
-        log.info(f"TELEMETRY_SYNC: spuštěn podproces PID={_telemetry_sync_proc.pid}")
-        if not _telemetry_sync_atexit_registered:
-            atexit.register(_stop_telemetry_sync)
-            _telemetry_sync_atexit_registered = True
-    except Exception as exc:
-        log.warning(f"TELEMETRY_SYNC: nepodařilo se spustit: {exc}")
 
 
 # ───── TURNING BOT ON/OFF, CONNECTOR  ──────────────────────────
@@ -241,7 +190,7 @@ def main() -> None:
     # Pokud session manager zapnuty a startujeme mimo session,
     # recovery proveden bude, ale loop se rovnou rozhodne usnout - vlny budou
     # blokovane a po probuzeni se recovery udela znovu, takze stav je konzistentni.
-    if is_session_enabled(cfg) and not is_in_session(cfg, get_broker_now(cfg)):
+    if is_session_enabled(cfg) and not is_in_session(cfg):
         log.info(
             "SESSION: Startujeme MIMO trading session - "
             "recovery probehne pri prvni wake-up v live loopu."
@@ -278,11 +227,11 @@ def main() -> None:
     sys.excepthook = _excepthook
     atexit.register(lambda: _log_stop("SHUTDOWN"))
 
-    _start_telemetry_sync(log)
+    ensure_telemetry_sync_running(log, cfg)
 
     # 5) Live loop
     run_live_loop(cfg, sent_signals, json_log_file=json_log_file)
-    _stop_telemetry_sync()
+    stop_telemetry_sync()
     shutdown()
 
 

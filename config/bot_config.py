@@ -196,14 +196,15 @@ class BotConfig:
     ext_range_confirm_waves: int = 2  # pocet po sobe jdoucich strukturalnich vln noveho smeru
     ext1_protect_positions_until_wave2: bool = True
     session_enabled: bool = True
-    session_open_time: str = "23:05"
-    session_close_time: str = "21:45"
+    session_timezone: str = "broker"  # "broker" | "UTC+3" / "GMT+3" | IANA zona pro session on/off
+    session_open_time: str = "01:05"
+    session_close_time: str = "23:45"
     session_pre_close_buffer_min: int = 5 # minut pred session_close_time se zrusi pendingy (kazdy den)
     session_weekdays_only: bool = True
     session_week_close_weekday: int = 4 # 0=Po .. 6=Ne (typicky 4=Pá po close_time)
-    session_week_close_time: str = "21:45"
+    session_week_close_time: str = "23:45"
     session_week_open_weekday: int = 6 # 0=Po .. 6=Ne (typicky 0=Ne po close_time)
-    session_week_open_time: str = "23:05"
+    session_week_open_time: str = "01:05"
     session_close_positions_on_friday: bool = False
 
     def __post_init__(self) -> None:
@@ -336,14 +337,15 @@ LIVE_BOT_CONFIG = BotConfig(
 
     # ============== TIME RESET ==============
     session_enabled=True,  #L vypnout/zapnout bot podle casu (session_manager + live_loop)
-    session_open_time="23:05",  #L broker time — zacatek denni session
-    session_close_time="21:45",  #L broker time — konec denni session
-    session_pre_close_buffer_min=5,  #L min pred close: snapshot + cancel_all_pendings
+    session_timezone="UTC+3",  #L session on/off v GMT+3; strategie dale broker/MT5
+    session_open_time="01:05",  #L GMT+3 — zacatek denni session
+    session_close_time="23:45",  #L GMT+3 — konec denni session
+    session_pre_close_buffer_min=5,  #L min pred close: snapshot + cancel_all_pendings (23:40)
     session_weekdays_only=True,  #L tydenni pauza mezi week_close a week_open
     session_week_close_weekday=4,  #L 0=Po .. 6=Ne (4=Pá)
-    session_week_close_time="21:45",  #L
+    session_week_close_time="23:45",  #L GMT+3
     session_week_open_weekday=6,  #L 0=Po .. 6=Ne (6=Ne)
-    session_week_open_time="23:05",  #L
+    session_week_open_time="01:05",  #L GMT+3
     session_close_positions_on_friday=False,  #L pred tydennim close zavrit i pozice
 
     # ============== ADX 14  & PNL ==============
