@@ -1,0 +1,187 @@
+PROMPT: Realistický backtest = parita s live nasazením
+======================================================
+
+Kontext
+-------
+Repo: c:\Trading_bots\FTMO_100k
+Config: LIVE_BOT_CONFIG (config/bot_config.py) — wave_positions_only=True,
+        wave_isolation_study=True, tp_mode=WAVE_TARGET_N
+Období pro ověření: 2025-11-10 → 2026-05-09, data: data/EURUSD_M30.csv
+Python: .venv\Scripts\python.exe
+
+Nezávislý audit (MAIN CHANGE.txt, oddíl 10) potvrdil:
+
+  Metrika          Backtest      Live E2E      Delta
+  WAVE obchodů     164           159           -5
+  net PnL          ~+39 041 USD  ~+10 996 USD  ~-28 045 USD
+  max DDi          ~-6,14 %      ~-6,74 %      ~parita
+
+PnL rozklad:
+  - 132 společných vln: BT +24 165 / LV +10 285 (Δ -13 880) — primárně exit
+    (BOS vs TP_WAVE_N), ne vstup
+  - 32 BT-only: +14 876 (live neotevře) — mix look-ahead + routing
+  - 27 LV-only: +711
+
+Backtest NEPŘEDPOVÍDÁ live, dokud neopravíme:
+  1. look-ahead v backtest engine (BOS-retro + EP/SL z budoucího draw_right)
+  2. live exit vrstvu (předčasný BOS místo TP_WAVE_N)
+  3. routing/placement paritu (sdílená rozhodovací logika)
+  4. validační harness (main-loop E2E, ne jen replay)
+
+
+Cíl
+---
+Upravit kód tak, aby `python -m backtest.run_backtest --profile live_match`
+s LIVE_BOT_CONFIG dával REALISTICKÝ odhad chování live bota v nasazení — ne
+ideální 39k s look-ahead biasem.
+
+Cílový referenční PnL po opravách: řádově ~25–35k (ne 39k), s live E2E blízko
+backtestu v toleranci:
+  - PnL ±1 %, počty obchodů ±2, max DDi ±0,3 pp
+
+
+Fáze 1 — Backtest: odstranit look-ahead (priorita)
+--------------------------------------------------
+Soubory: backtest/engine.py, případně strategy/wave_detection_pine.py,
+         strategy/trend_bos.py
+
+1A) BOS-retro parita s live
+    Engine dnes na flip_bar volá _process_new_wave(bypass_trend_filter=True)
+    z _bos_flip_wave_by_bar (~ř. 965–982), i když birth > flip_bar.
+
+    Live (runtime/live_loop.py, _attempt_live_bos_retro_entry) povolí retro jen když:
+      - birth is not None
+      - birth < flip_bar  (strict: birth >= last_bar_idx → skip)
+      - flip_bar == current_bar
+
+    Úkol: Přidat stejné podmínky do engine před BOS-retro vstupem. Vlny s proven
+    look-ahead (5× v auditu, např. 202512102200: flip=1095, birth=1104,
+    draw_right=1119) se NESMÍ otevřít dříve než live.
+
+1B) EP/SL bez budoucích pivotů
+    Při vstupu na baru i nesmí _process_new_wave používat fib50/sl z vlny, jejíž
+    draw_right > i.
+
+    Úkol: Při placementu useknout box na draw_right = min(wave.draw_right, bar_idx)
+    (nebo ekvivalent) a EP/SL přepočítat z useknutého boxu — parita s tím, co live
+    v daném okamžiku zná.
+
+1C) (Volitelně, pokud zůstane gap) Kauzální vlny
+    Engine startuje run_pine_wave_simulation(df, cfg) na celém DF (~ř. 529–596).
+    Live také volá detect_waves(df) na celém DF — obě strany sdílejí ex-post vlny.
+    Pokud po 1A+1B zůstane gap u 6 vln „mimo detect_waves“, zvážit bar-po-baru
+    detekci nebo zamrznutí draw_right k birth/flip baru.
+
+Ověření fáze 1:
+  $env:E2E_FIRE_ON_BIRTH="1"
+  .venv\Scripts\python.exe scripts/e2e_live_broker_sim.py
+
+  - BT-only klesne (méně než 32, proven LA = 0 nových obchodů)
+  - BT net PnL klesne z ~39k směrem k ~24–26k
+  - Neměnit produkční live chování v této fázi — jen backtest
+
+
+Fáze 2 — Live exit: BOS vs TP_WAVE_N (priorita #1 pro společné obchody)
+-------------------------------------------------------------------------
+Soubory: runtime/missed_bar_replay.py, runtime/live_loop.py,
+         runtime/wave_target_n_bar.py, infra/orders.py (close_positions_by_direction),
+         strategy/wave_sequence.py (should_close_trade_on_bos_flip,
+         should_close_trade_on_tp_wave_n)
+
+Problém: Na 132 společných vlnách backtest končí TP_WAVE_N, live E2E dřív BOS_EXIT.
+Příklady:
+  - 202601201530: BT TP bar 2552 +2348 | LV BOS bar 2446 -122 (stejný entry)
+  - 202601282100: BT TP 2808 +1613 | LV BOS 2695 -211
+  - 202603031300: BT TP 4002 +2004 | LV BOS 3871 +289
+
+Engine pořadí na baru (~ř. 641–698): BOS handler → _maybe_fire_tp_wave_event.
+Live replay (~ř. 211–292): close_positions_by_direction → run_wave_target_n_bar_cycle.
+
+Úkol:
+  - Sladit live BOS close s engine should_close_trade_on_bos_flip (per-trade, ne batch
+    „všechny BUY když bear“ bez flip kontextu)
+  - Zajistit, že WAVE pozice ve směru trendu DRŽÍ až do TP_WAVE_N eventu
+    (jako engine docstring u _maybe_fire_tp_wave_event ~ř. 2403+)
+  - Pořadí: TP_WAVE_N event vs BOS na stejném baru — parita s engine
+  - E2E_FIRE_ON_BIRTH=1: v runtime/wave_target_n_bar.py (~ř. 75) event bar = birth;
+    bez env = draw_right. Sjednotit s engine (ideálně bez env hacku)
+
+Ověření fáze 2: stejný E2E běh — na společných vlnách:
+  - entry parita ≥120/132 (zachovat)
+  - PnL diff >1 USD klesne z 108/132
+  - top diff vlny (202601201530 atd.) mají shodný close_reason nebo LV close_bar ≥ BT
+    close_bar u winnerů
+
+Důležité: Ne degradovat engine tak, aby simuloval live bug. Opravit LIVE, ne backtest.
+
+
+Fáze 3 — Routing / placement parita
+------------------------------------
+Soubory: backtest/engine.py (_process_new_wave), runtime/live_loop.py,
+         runtime/live_wave_isolation.py, runtime/missed_bar_replay.py
+
+Guard fix (EXT primary, BOS-retro) je hotový — guard_live_send_order neblokuje WAVE
+typy (~ř. 173–205), testy tests/test_live_wave_isolation.py procházejí.
+
+Úkol: Sjednotit entry rozhodnutí do sdílených helperů volaných z engine i live/replay:
+  - trend_filter / HH-HL
+  - post_ext_confirmed_trend_lock, post_ext_trend_suppressed
+  - two-sided parent skip
+  - wave age, session, duplicate signals
+
+Ověření:
+  .venv\Scripts\python.exe scripts/live_replay_parity.py
+
+Cíl: BT placed WAVE ≈ live placed WAVE (dnes 199 vs 157, shoda 139); REALNY rozdil A
+(BT položil, live ne) klesne z 60.
+
+
+Fáze 4 — Validace a broker realism
+-----------------------------------
+Soubory: nový nebo rozšířený scripts/e2e_live_broker_sim.py, main.py,
+         backtest/sim_params.py
+
+Úkol:
+  - Main-loop E2E driver: run_live_loop + mock MT5 (ne jen replay_missed_closed_bar)
+  - Odstranit závislost na E2E_FIRE_ON_BIRTH / E2E_TRACE_WAVES v produkční cestě
+  - Volitelný režim --realistic-broker: bez EXT-1 ochrany ve simulaci (MT5 ji nemá),
+    reálnější spread
+
+Finální acceptance:
+  $env:E2E_FIRE_ON_BIRTH="1"   # dokud není sjednoceno natvrdo
+  .venv\Scripts\python.exe scripts/e2e_live_broker_sim.py
+  python -m backtest.run_backtest --profile live_match --date-from 2025-11-10 --date-to 2026-05-09
+  .venv\Scripts\python.exe -m pytest tests/test_live_wave_isolation.py -q
+
+
+Pravidla implementace
+---------------------
+  1. Minimální scope — každá fáze samostatně committovatelná, bez refaktoringu mimo nutné
+  2. Necommitovat bez explicitního pokynu uživatele
+  3. Na FTMO účet žádné reálné ordery — E2E jen fake broker
+  4. Nepřepisovat MAIN CHANGE.txt ani audit report, pokud není požádáno
+  5. Po každé fázi: tabulka metrik (WAVE count, net PnL, max DDi, common/BT-only/LV-only)
+  6. Pokud čísla nesedí s očekáváním, uvést proč (data, env, regrese)
+
+
+Referenční soubory
+------------------
+  MAIN CHANGE.txt              — tvrzení a hypotézy A–G
+  backtest/engine.py           — look-ahead, TP_WAVE_N, BOS exit
+  runtime/live_loop.py         — produkční loop, BOS retro
+  runtime/missed_bar_replay.py — replay BOS/TP/entries
+  runtime/wave_target_n_bar.py — TP_WAVE_N live cyklus
+  scripts/e2e_live_broker_sim.py — parity harness
+  scripts/live_replay_parity.py  — placement audit
+  backtest/stats.py            — classify_position_kind (WAVE sloupec)
+
+
+Výstup agenta
+-------------
+  1. Stručný plán změn po fázích (co, kde, proč)
+  2. Implementace fáze po fázi s metrikami před/po
+  3. Seznam zbývajících gapů a doporučení dalšího kroku
+  4. Ne označovat hotovo, dokud E2E WAVE PnL není v toleranci ±1 % vůči opravenému backtestu
+
+Začni fází, kterou uživatel explicitně zvolí; pokud neřekne, začni Fáze 1A+1B
+(backtest look-ahead), pak Fáze 2 (live exit).
