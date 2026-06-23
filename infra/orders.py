@@ -29,6 +29,10 @@ from strategy.ext_logic import (
     is_ext_wave_pending_comment,
     is_trade_within_parent_ext_window,
 )
+from strategy.two_sided import (
+    live_study_ts2_use_wave_primary_sizing,
+    study_ts2_limit_lot_entry_ref,
+)
 from strategy.trend_bos import TrendState, entry_allowed_at_fill_bar, resolve_effective_tp
 from strategy.ext_range import pending_protected_from_bos_direction_cancel_by_comment
 from strategy.wave_sequence import (
@@ -439,6 +443,7 @@ def send_order(
     trend_state_at_fill: TrendState | None = None,
     bypass_trend_filter: bool = False,
     is_two_sided_mirror: bool = False,
+    bar_open: float | None = None,
 ) -> bool:
     """
     Posle TREND-FOLLOW order podle signalu (dir/fib50/sl) a entry_mode.
@@ -560,6 +565,9 @@ def send_order(
             tick=tick, min_stop_dist=min_stop_dist, digits=digits,
             signal=signal, placed_meta=placed_meta,
             is_two_sided_mirror=is_two_sided_mirror,
+            bar_open=bar_open,
+            decision_ask=decision_ask,
+            decision_bid=decision_bid,
         )
 
     # ── Fallback (cena je uz za entry smerem k SL) ──
@@ -587,6 +595,9 @@ def send_order(
             trend_state_at_fill=trend_state_at_fill,
             bypass_trend_filter=bypass_trend_filter,
             is_two_sided_mirror=is_two_sided_mirror,
+            bar_open=bar_open,
+            decision_ask=decision_ask,
+            decision_bid=decision_bid,
         )
 
     if em_value == "stop_fallback":
@@ -633,7 +644,10 @@ def _place_limit_primary(cfg: BotConfig, *, side: str, is_buy: bool, ep: float,
                          move_pct: float | None, tick, min_stop_dist: float,
                          digits: int, signal: dict | None = None,
                          placed_meta: dict | None = None,
-                         is_two_sided_mirror: bool = False) -> bool:
+                         is_two_sided_mirror: bool = False,
+                         bar_open: float | None = None,
+                         decision_ask: float | None = None,
+                         decision_bid: float | None = None) -> bool:
     """Primarni BUY/SELL LIMIT na entry (fib50).
 
     TP se resi pres `resolve_effective_tp(cfg, signal, ep, sl, is_buy)` —
@@ -641,7 +655,24 @@ def _place_limit_primary(cfg: BotConfig, *, side: str, is_buy: bool, ep: float,
     a broker pak dostane TP=0.0 (= bez TP). Min-stop-dist kontrola pro TP se
     pri tp=None preskoci.
     """
-    lot = calc_lot(ep, sl, cfg)
+    if lot_calc:
+        lot_ep = ep
+        if (
+            live_study_ts2_use_wave_primary_sizing(cfg)
+            and is_two_sided_mirror
+            and decision_ask is not None
+            and decision_bid is not None
+        ):
+            lot_ep = study_ts2_limit_lot_entry_ref(
+                ep,
+                is_buy,
+                bar_open=bar_open,
+                decision_ask=float(decision_ask),
+                decision_bid=float(decision_bid),
+            )
+        lot = calc_lot(lot_ep, sl, cfg)
+    else:
+        lot = calc_lot(ep, sl, cfg)
     if signal is None:
         signal = {}
     tp = resolve_effective_tp(cfg, signal, ep, sl, is_buy)
@@ -703,7 +734,10 @@ def _place_market_fallback(cfg: BotConfig, *, side: str, is_buy: bool, sl: float
                            placed_meta: dict | None = None,
                            trend_state_at_fill: TrendState | None = None,
                            bypass_trend_filter: bool = False,
-                           is_two_sided_mirror: bool = False) -> bool:
+                           is_two_sided_mirror: bool = False,
+                           bar_open: float | None = None,
+                           decision_ask: float | None = None,
+                           decision_bid: float | None = None) -> bool:
     """MARKET fallback: vstup za aktualni cenu, lot/TP prepocitan, SL dle fib nebo risk_span (abort_shift_sl).
 
     TP resi `resolve_effective_tp`. None = bez TP (broker dostane TP=0.0).
@@ -736,15 +770,25 @@ def _place_market_fallback(cfg: BotConfig, *, side: str, is_buy: bool, sl: float
         return False
     market_price = tick.ask if is_buy else tick.bid
     sl_eff = float(sl)
-    if risk_span is not None and risk_span > 0:
+    study_ts2 = live_study_ts2_use_wave_primary_sizing(cfg) and is_two_sided_mirror
+    if study_ts2:
+        sl_eff = float(sl)
+    elif risk_span is not None and risk_span > 0:
         sl_eff = (market_price - risk_span) if is_buy else (market_price + risk_span)
         log.info(
             f"[ABORT_SHIFT_SL] {side} MARKET | Wave {wave_time} | "
             f"cena={market_price:.5f} risk_span={risk_span:.5f} → SL={sl_eff:.5f}"
         )
-    lot = calc_lot(market_price, sl_eff, cfg)
-    if signal is None:
-        signal = {}
+    lot_ep = market_price
+    if study_ts2 and decision_ask is not None and decision_bid is not None:
+        lot_ep = study_ts2_limit_lot_entry_ref(
+            float(signal.get("fib50", market_price)),
+            is_buy,
+            bar_open=bar_open,
+            decision_ask=float(decision_ask),
+            decision_bid=float(decision_bid),
+        )
+    lot = calc_lot(lot_ep, sl_eff, cfg)
     tp = resolve_effective_tp(cfg, signal, market_price, sl_eff, is_buy)
     label = f"{side}_MARKET"
 
@@ -1270,6 +1314,7 @@ def cancel_counter_trend_wave_pendings(
 def close_positions_by_direction(cfg: BotConfig, direction: int,
                                   *, reason: str = "BOS_EXIT",
                                   protected_wave_times: set[str] = None,
+                                  promoted_two_sided_wave_times: set[str] | None = None,
                                   protect_ext_block_from_wave: str | None = None,
                                   ext1_protection_per_bar: list[bool] | None = None,
                                   current_bar_idx: int | None = None,
@@ -1321,9 +1366,10 @@ def close_positions_by_direction(cfg: BotConfig, direction: int,
 
         orig_comment = str(getattr(p, "comment", "") or "")
         is_buy = int(p.type) == int(getattr(mt5, "POSITION_TYPE_BUY", -1))
-        trade_view = _Mt5PositionTradeView(
+        trade_view = _position_trade_view(
             pos_dir=1 if is_buy else -1,
             comment=orig_comment,
+            promoted_two_sided_wave_times=promoted_two_sided_wave_times,
         )
         
         # 1) Stejna parent EXT — beze zmeny chovani (chranena)
@@ -1379,12 +1425,17 @@ def close_positions_by_direction(cfg: BotConfig, direction: int,
                         closed += 1
                 continue
 
-        # UZIVATELSKY POZADAVEK: flip-follower (WAVE_COUNTER, EXT primary WAVE, …)
-        # nesmi per-bar BOS close zavrit — ceka na flip nebo SL.
-        # Vyjimka: broken_dir batch (trade.dir == direction) ma follower zavrit.
+        # Flip-follower (WAVE_COUNTER, EXT primary WAVE, TWO_SIDED, EXT_COUNTER)
+        # se per-bar BOS NEZAVIRA — drzi se az do skutecneho BOS flipu (kde ho
+        # zavre close_flip_follower_positions_on_bos) nebo na SL. Parita s engine
+        # should_close_trade_on_bos_flip(flipped=False) -> False (drzi).
+        # POZN.: tato funkce iteruje jen pozice broken smeru (dir == direction),
+        # takze podminka "dir != direction" by ochranu nikdy nespustila — proto
+        # se chrani vsechny flip-followery v per-bar pruchodu.
+        # EXT_BOS_CLOSE ma vlastni vetev nize (vsechny flip-followery chranene).
         if (
             is_bos_flip_follower_trade(trade_view)
-            and int(trade_view.dir) != int(direction)
+            and reason != "EXT_BOS_CLOSE"
         ):
             sl = float(getattr(p, "sl", 0.0) or 0.0)
             if (
@@ -1622,6 +1673,24 @@ class _Mt5PositionTradeView:
             self.entry_tag = "ext_0236"
         else:
             self.entry_tag = "base"
+
+
+def _position_trade_view(
+    *,
+    pos_dir: int,
+    comment: str,
+    promoted_two_sided_wave_times: set[str] | None = None,
+) -> _Mt5PositionTradeView:
+    """MT5 pozice → trade view; promoted TS2_ chova se jako WAVE (engine parity)."""
+    view = _Mt5PositionTradeView(pos_dir=pos_dir, comment=comment)
+    if (
+        promoted_two_sided_wave_times
+        and view.is_two_sided_mirror
+        and view.wave_time
+        and view.wave_time in promoted_two_sided_wave_times
+    ):
+        view.is_two_sided_mirror = False
+    return view
 
 
 class _TpWaveTradeView(_Mt5PositionTradeView):
@@ -1966,6 +2035,47 @@ def close_positions_on_extension_tp_hit(
 
 
 
+def clear_fixed_tp_on_ts2_wave_times(
+    cfg: BotConfig,
+    *,
+    wave_times: set[str],
+) -> int:
+    """Zrusi fixni TP u TS2_ pozic po BOS promote (engine: trade.tp = None @2156)."""
+    if not wave_times:
+        return 0
+    positions = mt5.positions_get(symbol=cfg.symbol) or ()
+    if not positions:
+        return 0
+    from infra.trade_tracker import _wave_id_from_comment
+
+    cleared = 0
+    for p in positions:
+        if int(getattr(p, "magic", -1)) != int(cfg.magic):
+            continue
+        comment = str(getattr(p, "comment", "") or "")
+        if not comment.startswith(TWO_SIDED_MIRROR_COMMENT_PREFIX):
+            continue
+        wt = _wave_id_from_comment(comment)
+        if not wt or wt not in wave_times:
+            continue
+        tp = float(getattr(p, "tp", 0.0) or 0.0)
+        if tp <= 0.0:
+            continue
+        req = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "symbol": cfg.symbol,
+            "position": int(p.ticket),
+            "sl": float(getattr(p, "sl", 0.0) or 0.0),
+            "tp": 0.0,
+            "magic": int(cfg.magic),
+        }
+        result = _send_request(req, "TS2_PROMOTED_CLEAR_TP", cfg)
+        if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+            cleared += 1
+            log.info(f"TS2 promote: vymazan TP u pozice #{p.ticket} | {comment}")
+    return cleared
+
+
 def cancel_flip_follower_pendings_on_bos(
     cfg: BotConfig, *, reason: str = "BOS_CANCEL_PENDING",
 ) -> int:
@@ -2003,6 +2113,7 @@ def close_flip_follower_positions_on_bos(
     bar_low: float,
     reason: str = "BOS_EXIT",
     protected_wave_times: set[str] | None = None,
+    promoted_two_sided_wave_times: set[str] | None = None,
     ext1_protection_per_bar: list[bool] | None = None,
     current_bar_idx: int | None = None,
     protect_ext_block_from_wave: str | None = None,
@@ -2012,9 +2123,12 @@ def close_flip_follower_positions_on_bos(
     """
     Zavre flip-follower pozice pri BOS flipu (backtest-aligned).
 
-    Scope = should_close_trade_on_bos_flip(flipped=True) minus broken_dir pozice,
-    ktere uz zavrela close_positions_by_direction ve stejnem cyklu.
-    Zahrnuje CNTR_, TS2_, ECT_, ECB_.
+    Scope = should_close_trade_on_bos_flip(flipped=True) == True, tj. flip-followery
+    ve smeru rozbiteho (stareho) trendu (dir == broken_dir). Plain WAVE pozice
+    v broken_dir uz zavrela close_positions_by_direction per-bar; flip-followery
+    se per-bar drzi (chranene) a zaviraji se TEPRVE zde na skutecnem flipu —
+    parita s engine _handle_bos_exit_on_bar (should_close flipped=True).
+    Zahrnuje CNTR_, TS2_, ECT_, ECB_, EWP_ (EXT primary WAVE).
     """
     if broken_dir not in (1, -1):
         log.error(f"close_flip_follower_positions_on_bos: neplatny broken_dir={broken_dir}")
@@ -2032,7 +2146,11 @@ def close_flip_follower_positions_on_bos(
         comment = str(getattr(p, "comment", "") or "")
         is_buy = int(p.type) == int(getattr(mt5, "POSITION_TYPE_BUY", -1))
         pos_dir = 1 if is_buy else -1
-        trade_view = _Mt5PositionTradeView(pos_dir=pos_dir, comment=comment)
+        trade_view = _position_trade_view(
+            pos_dir=pos_dir,
+            comment=comment,
+            promoted_two_sided_wave_times=promoted_two_sided_wave_times,
+        )
         if not should_close_trade_on_bos_flip(
             trade_view,
             broken_dir=int(broken_dir),
@@ -2040,8 +2158,11 @@ def close_flip_follower_positions_on_bos(
             protected_wave_times=protected,
         ):
             continue
-        if int(pos_dir) == int(broken_dir):
-            continue
+        # POZN.: drive zde byl `if pos_dir == broken_dir: continue` s predpokladem,
+        # ze broken_dir pozice uz zavrela close_positions_by_direction per-bar.
+        # Flip-followery se ale nove per-bar DRZI (parita s engine), takze je musi
+        # zavrit prave tento flip handler (should_close_trade_on_bos_flip(flipped=True)
+        # vraci True jen pro flip-followery v broken_dir).
         sl = float(getattr(p, "sl", 0.0) or 0.0)
         sl_hit = _tp_wave_sl_hit_on_bar(
             is_buy=is_buy, sl=sl, bar_high=float(bar_high), bar_low=float(bar_low),

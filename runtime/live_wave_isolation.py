@@ -3,7 +3,10 @@ Live MT5 execution — parita s grid backtesterem podle rezimu pozic.
 
 Rezimy (classify_live_execution_mode):
   - wave_study_wave_only: wave_isolation_study=True (varianta B) — engine plny routing
-    (counter/EXT logika), MT5 posila JEN klasické WAVE; wave_pnl = equity slice
+    (counter/EXT logika), MT5 posila tu mnozinu, kterou backtest klasifikuje jako WAVE
+    (classify_position_kind == "WAVE"): klasicke WAVE + EXT-primarni (is_ext, base tag)
+    + BOS-retro vstupy. Potlaci se jen two_sided mirror (WAVE_TWO_SIDED) a
+    post_ext_trend_suppressed. wave_pnl = equity slice
   - wave_slice: legacy live_mt5_wave_slice_only bez study
   - wave_only: jen klasické WAVE, bez EXT/counter/PP/BOS orderů (engine config)
   - full: vsechny moduly podle engine configu
@@ -18,7 +21,6 @@ from config.bot_config import BotConfig
 from config.position_modes import bot_config_is_wave_positions_only, resolve_grid_engine_config
 from core.logging_utils import log_event
 from runtime.live_wave_stats import position_kind_from_mt5_comment
-from strategy.ext_logic import is_ext_wave
 
 LiveExecutionMode = Literal[
     "wave_study_wave_only",
@@ -143,9 +145,15 @@ def apply_live_mt5_wave_slice_execution(
     return replace(cfg, **{k: v for k, v in overrides.items() if k in names})
 
 
-def is_isolation_study_allowed_mt5_comment(comment: str) -> bool:
-    """Pending/pozice povolene ve study variante B — jen W{wave_time}."""
-    return is_wave_mt5_comment(str(comment or ""))
+def is_isolation_study_allowed_mt5_comment(comment: str, cfg: BotConfig | None = None) -> bool:
+    """Pending/pozice povolene ve study variante B — jen W{wave_time} nebo TS2_."""
+    c = str(comment or "")
+    if is_wave_mt5_comment(c):
+        return True
+    if cfg is not None and getattr(cfg, "live_study_two_sided_mirror_orders", False):
+        if c.startswith("TS2_"):
+            return True
+    return False
 
 
 def skip_live_non_wave_entry(
@@ -184,25 +192,14 @@ def guard_live_send_order(
 
     wt = str(signal.get("wave_time", "") or "")
     if is_two_sided_mirror:
+        if getattr(cfg, "live_study_two_sided_mirror_orders", False):
+            return False  # Povolime odeslani TS2_
         skip_live_non_wave_entry(
             cfg, "TWO_SIDED", wave_id=wt, reason="two_sided_mirror",
         )
         return True
-    if bypass_trend_filter:
-        skip_live_non_wave_entry(
-            cfg, "BOS_RETRO", wave_id=wt, reason="bos_retro_entry",
-        )
-        return True
     if bool(signal.get("post_ext_trend_suppressed", False)):
         return True
-    try:
-        if is_ext_wave(signal, cfg):
-            skip_live_non_wave_entry(
-                cfg, "EXT_WAVE", wave_id=wt, reason="ext_primary_wave",
-            )
-            return True
-    except Exception:
-        pass
     return False
 
 
@@ -215,7 +212,7 @@ def filter_wave_only_pending_snapshots(
         return snapshots
     return [
         s for s in snapshots
-        if is_isolation_study_allowed_mt5_comment(getattr(s, "comment", ""))
+        if is_isolation_study_allowed_mt5_comment(getattr(s, "comment", ""), cfg)
     ]
 
 
@@ -235,14 +232,14 @@ def audit_mt5_non_wave_exposure(cfg: BotConfig) -> None:
         if o.magic != cfg.magic:
             continue
         c = str(o.comment or "")
-        if not is_isolation_study_allowed_mt5_comment(c):
+        if not is_isolation_study_allowed_mt5_comment(c, cfg):
             foreign_orders.append(c)
 
     for p in mt5.positions_get(symbol=cfg.symbol) or []:
         if p.magic != cfg.magic:
             continue
         c = str(p.comment or "")
-        if is_isolation_study_allowed_mt5_comment(c):
+        if is_isolation_study_allowed_mt5_comment(c, cfg):
             continue
         kind = position_kind_from_mt5_comment(c)
         foreign_positions.append(f"{c}:{kind}")

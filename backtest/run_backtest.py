@@ -628,6 +628,17 @@ def _export_scroll_combined_html(
     )
 
 
+def _apply_backtest_runtime_flags(cfg: BotConfig, args) -> BotConfig:
+    """CLI prepisuje BotConfig causal_mode / run_e2e_parity."""
+    if args is None:
+        return cfg
+    if getattr(args, "causal", False):
+        cfg.causal_mode = True
+    if getattr(args, "e2e", False):
+        cfg.run_e2e_parity = True
+    return cfg
+
+
 def _run_single_config(
     cfg: BotConfig,
     df: pd.DataFrame,
@@ -638,6 +649,9 @@ def _run_single_config(
     test_pozice: int | None = None,
 ) -> dict:
     """Spusti backtest pro jeden config, vytiskne summary, ulozi trades CSV."""
+    cfg = _apply_backtest_runtime_flags(cfg, args)
+    if cfg.causal_mode:
+        print("=== CAUSAL MODE: backtest bez look-ahead (parita live) ===")
     print(f"\n>>> Spoustim backtest: {cfg.bot_name} ({cfg.symbol} {cfg.timeframe_label})")
     # ──────────────────────────────────────────────────────────────────────
     # WICK FAKEOUT RECOVERY (WF) — sekce config printu backtesteru
@@ -808,6 +822,18 @@ def _run_single_config(
         from backtest.grid.grid_report_io import write_live_match_grid_report
 
         write_live_match_grid_report(stats, output_dir, args=args)
+
+    if bool(getattr(cfg, "run_e2e_parity", False)):
+        from backtest.causal_gate_e2e import (
+            print_causal_gate_e2e_report,
+            run_e2e_parity_after_backtest,
+        )
+
+        e2e_result = run_e2e_parity_after_backtest(
+            df, cfg, backtest_trades=trades, backtest_stats=stats,
+        )
+        print_causal_gate_e2e_report(e2e_result)
+        stats["e2e_parity"] = e2e_result.parity
 
     return stats
 
@@ -1316,6 +1342,16 @@ def main():
                         help="Filtr od (YYYY-MM-DD)")
     parser.add_argument("--date-to", type=str, default=None,
                         help="Filtr do (YYYY-MM-DD)")
+    parser.add_argument(
+        "--causal",
+        action="store_true",
+        help="Zapne causal_mode — backtest bez look-ahead (parita live)",
+    )
+    parser.add_argument(
+        "--e2e",
+        action="store_true",
+        help="Po backtestu spusti E2E parity (live replay + fake MT5)",
+    )
     parser.add_argument("--workers", type=int, default=None,
                         help="Pocet workeru pro grid (default: cpu_count - 1)")
     parser.add_argument("--sequential", action="store_true",

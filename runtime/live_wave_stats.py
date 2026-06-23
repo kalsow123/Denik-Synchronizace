@@ -12,6 +12,7 @@ from typing import Optional
 from config.bot_config import BotConfig
 from backtest.stats import classify_position_kind
 from core.logging_utils import log_event
+from infra.trade_tracker import _wave_id_from_comment
 from strategy.ext_logic import (
     EXT_COUNTER_BOS_COMMENT_PREFIX,
     EXT_COUNTER_TIME_COMMENT_PREFIX,
@@ -19,8 +20,11 @@ from strategy.ext_logic import (
     EXT_SECONDARY_COMMENT_PREFIX,
 )
 
-
-def position_kind_from_mt5_comment(comment: str) -> str:
+def position_kind_from_mt5_comment(
+    comment: str,
+    cfg: BotConfig | None = None,
+    promoted_two_sided_wave_times: set[str] | None = None,
+) -> str:
     """Klasifikace pozice dle MT5 comment — stejná logika jako backtest stats."""
     c = str(comment or "")
     if c.startswith("PP_") or c.startswith("PPM_"):
@@ -30,8 +34,15 @@ def position_kind_from_mt5_comment(comment: str) -> str:
             is_pp=False, is_counter=True, is_bos_reentry=False, entry_tag="wave_counter",
         )
     if c.startswith("TS2_"):
+        is_promoted = False
+        if cfg and getattr(cfg, "live_study_promoted_two_sided_as_wave", False):
+            wt = _wave_id_from_comment(c)
+            if promoted_two_sided_wave_times and wt in promoted_two_sided_wave_times:
+                is_promoted = True
+        
         return classify_position_kind(
-            is_pp=False, is_counter=False, is_bos_reentry=False, is_two_sided_mirror=True,
+            is_pp=False, is_counter=False, is_bos_reentry=False,
+            is_two_sided_mirror=not is_promoted,
         )
     if c.startswith(EXT_SECONDARY_COMMENT_PREFIX):
         return classify_position_kind(
@@ -75,8 +86,14 @@ class LiveWaveStatsTracker:
         *,
         comment: str,
         pnl_usd: float,
+        cfg: BotConfig | None = None,
+        promoted_two_sided_wave_times: set[str] | None = None,
     ) -> Optional[str]:
-        kind = position_kind_from_mt5_comment(comment)
+        kind = position_kind_from_mt5_comment(
+            comment,
+            cfg=cfg,
+            promoted_two_sided_wave_times=promoted_two_sided_wave_times,
+        )
         if kind == "WAVE":
             self.wave_closes += 1
             self.wave_pnl_usd += float(pnl_usd)

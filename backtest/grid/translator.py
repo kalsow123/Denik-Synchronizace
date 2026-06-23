@@ -198,6 +198,8 @@ def grid_dict_to_bot_config(d: dict) -> BotConfig:
     adx14_change_enabled = _grid_bool(d.get("adx14_change_enabled"), False)
     adx14_equity_gate_enabled = _grid_bool(d.get("adx14_equity_gate_enabled"), False)
     pnl_base_tracker_enabled = _grid_bool(d.get("pnl_base_tracker_enabled"), True)
+    causal_mode = _grid_bool(d.get("causal_mode"), False)
+    run_e2e_parity = _grid_bool(d.get("run_e2e_parity"), False)
 
     cfg = BotConfig(
         bot_name=d.get("bot_name", "GRID_BOT"),
@@ -205,6 +207,8 @@ def grid_dict_to_bot_config(d: dict) -> BotConfig:
         symbol=d.get("symbol", "EURUSD"),
         timeframe=tf_int,
         wave_min_pct=float(d["wave_min_pct"]),
+        causal_mode=causal_mode,
+        run_e2e_parity=run_e2e_parity,
         min_opp_bars=int(d["min_opp_bars"]),
         rrr=float(d["rrr"]),
         entry_fib_level=float(d["fib_level"]),
@@ -329,6 +333,8 @@ def bot_config_to_grid_combo_dict(
         "bot_name": cfg.bot_name,
         "_grid_test_pozice": int(combo_no),
         "wave_min_pct": cfg.wave_min_pct,
+        "causal_mode": cfg.causal_mode,
+        "run_e2e_parity": cfg.run_e2e_parity,
         "min_opp_bars": cfg.min_opp_bars,
         "rrr": cfg.rrr,
         "fib_level": cfg.entry_fib_level,

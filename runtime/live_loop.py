@@ -94,7 +94,7 @@ from strategy.two_sided import (
     TwoSidedTracker,
     find_parent_wave_for_two_sided,
     parent_wave_qualifies,
-    prepare_two_sided_counter_signal,
+    prepare_ts2_mirror_entry_signal,
     replay_two_sided_tracker_engine_parity,
     skip_primary_entry_on_parent_wave,
     should_open_two_sided_counter,
@@ -258,41 +258,52 @@ def _attempt_live_bos_retro_entry(
 
     Same-bar birth+flip resi hlavni wave loop (trend filter retro bypass).
     """
+    from runtime.missed_bar_replay import _trace as _retro_trace
+
     wt = str(wave.get("wave_time", "") or "")
     if not wt or wt in retro_bos_attempted:
+        _retro_trace(wt, last_bar_idx, "retro:already_attempted_or_empty")
         return False, ext_sl_anchor
 
     birth = _wave_birth_bar_index(wt, wave_birth_by_time)
     if birth is None or birth >= int(last_bar_idx):
+        _retro_trace(wt, last_bar_idx, "retro:birth_ge_bar", birth=birth)
         return False, ext_sl_anchor
 
     flip_bar = _bos_flip_bar_for_wave(wt, bos_flip_map)
     if flip_bar is None or int(flip_bar) != int(last_bar_idx):
+        _retro_trace(wt, last_bar_idx, "retro:not_flip_bar", flip_bar=flip_bar)
         return False, ext_sl_anchor
 
     if _wave_is_wf_origin(wave):
+        _retro_trace(wt, last_bar_idx, "retro:wf_origin")
         return False, ext_sl_anchor
 
     sig_key = get_signal_key(wave, digits=signal_digits)
     if sig_key in sent_signals:
+        _retro_trace(wt, last_bar_idx, "retro:already_sent")
         retro_bos_attempted.add(wt)
         return False, ext_sl_anchor
 
     retro_bos_attempted.add(wt)
 
     if bool(wave.get("post_ext_trend_suppressed", False)):
+        _retro_trace(wt, last_bar_idx, "retro:post_ext_suppressed")
         sent_signals.add(sig_key)
         return False, ext_sl_anchor
 
     if is_wave_too_old(wt, cfg, ref_time=last_bar_time):
+        _retro_trace(wt, last_bar_idx, "retro:too_old", flip_bar=flip_bar, birth=birth)
         sent_signals.add(sig_key)
         return False, ext_sl_anchor
 
     if not is_wave_in_allowed_session(wt, cfg):
+        _retro_trace(wt, last_bar_idx, "retro:session")
         sent_signals.add(sig_key)
         return False, ext_sl_anchor
 
     if is_wave_too_large(wave["move_pct"], cfg, is_ext=is_ext_wave(wave, cfg)):
+        _retro_trace(wt, last_bar_idx, "retro:too_large")
         sent_signals.add(sig_key)
         return False, ext_sl_anchor
 
@@ -359,10 +370,12 @@ def _attempt_live_bos_retro_entry(
             all_waves=waves,
             entries_allowed=entries_allowed,
         )
+        _retro_trace(wt, last_bar_idx, "retro:SENT")
         sent_signals.add(sig_key)
         failed_signals.pop(sig_key, None)
         return True, ext_sl_anchor
 
+    _retro_trace(wt, last_bar_idx, "retro:send_failed")
     prev = failed_signals.get(sig_key, {"wave": wave_order, "attempts": 0})
     prev["wave"] = wave_order
     prev["attempts"] = int(prev.get("attempts", 0)) + 1
@@ -939,6 +952,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
     # Signaly, ktere nesly odeslat (typicky transient MT5 chyba), drzi se pro replay.
     failed_signals: Dict[str, Dict[str, Any]] = {}
     retro_bos_attempted: Set[str] = set()
+    promoted_two_sided_wave_times: Set[str] = set()
     # Posledni EXT vlna cekajici na prvni opacnou (WAVE SL na ext_low/ext_high).
     ext_sl_anchor: Optional[dict] = None
     was_mt5_connected: bool = True
@@ -1209,6 +1223,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                 tracker_state,
                 adx14_runtime=adx14_runtime,
                 live_wave_stats=live_wave_stats,
+                promoted_two_sided_wave_times=promoted_two_sided_wave_times,
             )
             from runtime.live_wave_stats import maybe_emit_live_wave_summary
 
@@ -1310,6 +1325,22 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
             from strategy.wave_detection_pine import compute_wave_birth_bars_pine
 
             _wave_birth_for_wf = compute_wave_birth_bars_pine(df, cfg)
+
+            # ENGINE PARITA (per-bar trend): engine pocita trend_states_per_bar JEDNOU nad
+            # detect mnozinou PRED WF merge (engine.py _recompute_bos_state) a uz ji po WF
+            # NEaktualizuje. Snapshot PRED WF + ext_range tagy = shodny trend zdroj jako
+            # engine; jinak wf_continued vlny (napr. 202603051030) blokuje fill-bar re-check
+            # kvuli post-WF zmene smeru trendu. Snapshot je kauzalni (jen data <= aktualni bar).
+            from strategy.ext_range import (
+                ext_range_enabled as _ext_enabled_pre,
+                reapply_ext_range_tags as _reapply_ext_pre,
+            )
+            _pre_wf_waves = [dict(w) for w in waves]
+            if _ext_enabled_pre(cfg):
+                _reapply_ext_pre(
+                    _pre_wf_waves, cfg, df=df, wave_birth=dict(_wave_birth_for_wf)
+                )
+
             wf_prep = wf_runtime.process(
                 df,
                 cfg,
@@ -1410,7 +1441,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                 or bos_entry_in_rrr_fixed_enabled(cfg)
             )
             if need_bar_trend:
-                bar_trend_states = compute_trend_states_per_bar(df, waves, cfg)
+                bar_trend_states = compute_trend_states_per_bar(df, _pre_wf_waves, cfg)
                 current_trend = bar_trend_states[last_bar_idx].direction if bar_trend_states else "neutral"
             fill_trend_state = (
                 bar_trend_states[last_bar_idx]
@@ -1451,6 +1482,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                     forming_tp_watch=forming_tp_watch,
                     ext_sl_anchor=ext_sl_anchor,
                     retro_bos_attempted=retro_bos_attempted,
+                    promoted_two_sided_wave_times=promoted_two_sided_wave_times,
                 )
                 for _missed_idx in new_bar_indices[:-1]:
                     _replay_state = replay_missed_closed_bar(
@@ -1480,12 +1512,15 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                         g_extension_hit_closed_positions=_g_extension_hit_closed_positions,
                         place_live_counter_position=_place_live_counter_position,
                         log_event_fn=log_event,
+                        two_sided_tracker=_live_two_sided_tracker,
+                        get_open_comments=lambda: [snap.get("comment", "") for snap in tracker_state.known_positions.values()],
                     )
                 last_known_trend_dir = _replay_state.last_known_trend_dir
                 prev_cycle_last_bar_time = _replay_state.prev_cycle_last_bar_time
                 processed_tp_wave_times = _replay_state.processed_tp_wave_times
                 forming_tp_watch = _replay_state.forming_tp_watch
                 ext_sl_anchor = _replay_state.ext_sl_anchor
+                promoted_two_sided_wave_times = _replay_state.promoted_two_sided_wave_times
 
             for _wf_act in wf_activation_queue:
                 if _wf_act.wf_wave is None:
@@ -1578,12 +1613,18 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
             _last_bar = df.iloc[last_bar_idx] if not df.empty else None
             _bar_high = float(_last_bar["high"]) if _last_bar is not None else None
             _bar_low = float(_last_bar["low"]) if _last_bar is not None else None
+            _promoted_ts2 = (
+                promoted_two_sided_wave_times
+                if bool(getattr(cfg, "live_study_promoted_two_sided_as_wave", False))
+                else None
+            )
 
             if do_close_pos and _last_bar is not None:
                 br = bos_per_bar_close_reason(cfg)
                 _dir_kw = dict(
                     reason=br,
                     protected_wave_times=protected_waves,
+                    promoted_two_sided_wave_times=_promoted_ts2,
                     protect_ext_block_from_wave=_bos_protect_wave_time,
                     ext1_protection_per_bar=ext1_per_bar,
                     current_bar_idx=last_bar_idx,
@@ -1631,6 +1672,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                         bar_low=_bar_low,
                         reason=br,
                         protected_wave_times=protected_waves,
+                        promoted_two_sided_wave_times=_promoted_ts2,
                         ext1_protection_per_bar=ext1_per_bar,
                         current_bar_idx=last_bar_idx,
                         protect_ext_block_from_wave=_bos_protect_wave_time,
@@ -1643,6 +1685,16 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                             closed_count=int(n_flip_follow),
                             tp_mode=str(cfg.tp_mode),
                         )
+
+                    # NOVE: promote two-sided mirror, ktery prezil close_flip_follower_positions_on_bos
+                    from runtime.two_sided_promote_live import on_bos_flip_promote_two_sided
+                    _comments = [snap.get("comment", "") for snap in tracker_state.known_positions.values()]
+                    promoted_two_sided_wave_times = on_bos_flip_promote_two_sided(
+                        flipped=True,
+                        existing_promoted=promoted_two_sided_wave_times,
+                        open_comments=_comments,
+                        cfg=cfg,
+                    )
                 except Exception as e:
                     log.error(f"BOS close flip followers selhal: {e}", exc_info=True)
 
@@ -1795,7 +1847,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                 # v case), ale samotny PP break musi byt potvrzen close-based BOS
                 # (viz pp_trend_confirmed_by_close_bos v _maybe_fire_pp_break_event).
                 if bar_trend_states is None:
-                    bar_trend_states = compute_trend_states_per_bar(df, waves, cfg)
+                    bar_trend_states = compute_trend_states_per_bar(df, _pre_wf_waves, cfg)
                 current_trend_local = (
                     bar_trend_states[last_bar_idx].direction
                     if bar_trend_states and last_bar_idx < len(bar_trend_states)
@@ -2216,7 +2268,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                             two_sided_only = True
                             _live_two_sided_tracker.register_counter_b_wave(str(wt))
                             if wave_counter_two_sided_orders_enabled(cfg):
-                                counter = prepare_two_sided_counter_signal(wave_order, cfg)
+                                counter = prepare_ts2_mirror_entry_signal(wave_order, cfg)
                                 log.info(
                                     f"TWO-SIDED COUNTER | "
                                     f"{'BUY' if counter['dir'] == 1 else 'SELL'} "
@@ -2231,6 +2283,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                                     trend_state_at_fill=fill_trend_state,
                                     is_two_sided_mirror=True,
                                     bar_close=bar_entry_close,
+                                    bar_open=float(_last_bar["open"]) if _last_bar is not None else None,
                                 ):
                                     sent_signals.add(sig_key)
                                     failed_signals.pop(sig_key, None)

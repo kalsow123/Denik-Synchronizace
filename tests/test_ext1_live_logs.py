@@ -32,7 +32,7 @@ from strategy.wave_sequence import build_ext1_wave_times, compute_ext1_protectio
 
 
 def _load_eurusd_slice():
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-05-10")].reset_index(drop=True)
     return df
@@ -163,8 +163,16 @@ def test_ext1_protect_keeps_aligned_ext_counter_open_on_bos_flip(eurusd_ext1_u2_
     assert not close_mkt.called
 
 
-def test_ext1_protect_allows_ext_counter_bos_close_broken_dir(eurusd_ext1_u2_scenario):
-    """ECT_ ve broken_dir se zavre pres close_positions_by_direction i behem EXT1."""
+def test_ext_counter_broken_dir_held_per_bar_closed_on_flip(eurusd_ext1_u2_scenario):
+    """ECT_ flip-follower ve broken_dir se per-bar BOS NEZAVIRA (drzi se jako engine),
+    zavre se az na skutecnem BOS flipu pres close_flip_follower_positions_on_bos.
+
+    Parita s backtest _handle_bos_exit_on_bar / should_close_trade_on_bos_flip:
+      - flipped=False (per-bar) -> flip-follower se drzi (hold),
+      - flipped=True  (flip)    -> flip-follower v broken_dir se zavre.
+    (Drive zde close_positions_by_direction zaviral ECT_ broken_dir uz per-bar,
+     coz byla divergence vuci engine — viz oprava exit vrstvy.)
+    """
     s = eurusd_ext1_u2_scenario
     cfg = s["cfg"]
     bar_idx = s["protected_bar"]
@@ -186,21 +194,39 @@ def test_ext1_protect_allows_ext_counter_bos_close_broken_dir(eurusd_ext1_u2_sce
     tick = type("T", (), {"bid": 1.11, "ask": 1.12})()
     done = SimpleNamespace(retcode=mt5.TRADE_RETCODE_DONE, comment="ok")
 
+    # 1) PER-BAR BOS close: flip-follower v broken_dir se DRZI (n == 0).
     with patch("infra.orders.mt5.positions_get", return_value=[pos]), patch(
         "infra.orders.mt5.symbol_info", return_value=info,
     ), patch("infra.orders.mt5.symbol_info_tick", return_value=tick), patch(
         "infra.orders._order_send_with_retry", return_value=done,
     ) as order_send:
-        n = close_positions_by_direction(
+        n_perbar = close_positions_by_direction(
             cfg,
             direction=+1,
             reason="BOS_EXIT",
             ext1_protection_per_bar=s["per_bar"],
             current_bar_idx=bar_idx,
+            bar_high=1.124,
+            bar_low=1.110,
         )
 
-    assert n == 1
-    assert order_send.called
+    assert n_perbar == 0
+    assert not order_send.called
+
+    # 2) SKUTECNY BOS flip: flip handler zavre broken_dir flip-follower (n == 1).
+    with patch("infra.orders.mt5.positions_get", return_value=[pos]), patch(
+        "infra.orders.mt5.symbol_info", return_value=info,
+    ), patch("infra.orders._close_mt5_position_market", return_value=True) as close_mkt:
+        n_flip = close_flip_follower_positions_on_bos(
+            cfg,
+            broken_dir=+1,
+            bar_high=1.124,
+            bar_low=1.110,
+            reason="BOS_EXIT",
+        )
+
+    assert n_flip == 1
+    assert close_mkt.called
 
 
 def test_ext1_protect_end_better_rrr_tp_on_real_ext1_u2_transition(eurusd_ext1_u2_scenario):

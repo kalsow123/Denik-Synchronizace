@@ -71,6 +71,16 @@ def run_wave_target_n_bar_cycle(
     if not is_wave_target_n_family(cfg):
         return result
 
+    import os as _os
+    _fire_on_birth = _os.environ.get("E2E_FIRE_ON_BIRTH") == "1"
+
+    def _event_bar(w: dict) -> int:
+        if _fire_on_birth:
+            b = birth_by_time.get(str(w.get("wave_time", "")))
+            if b is not None:
+                return int(b)
+        return int(w.get("draw_right", -1))
+
     target_n = int(getattr(cfg, "tp_target_wave_index", 0) or 0)
     main_trend_dir = (
         1 if current_trend == "bull" else -1 if current_trend == "bear" else 0
@@ -123,7 +133,7 @@ def run_wave_target_n_bar_cycle(
             result.g_counter_placed = bool(watch.counter_placed)
 
         for w in waves:
-            if int(w.get("draw_right", -1)) != int(bar_idx):
+            if _event_bar(w) != int(bar_idx):
                 continue
             wt = str(w["wave_time"])
             info = seq_info.get(wt)
@@ -219,7 +229,7 @@ def run_wave_target_n_bar_cycle(
         wt = str(w["wave_time"])
         if wt in processed_tp_wave_times:
             continue
-        if int(w.get("draw_right", -1)) != int(bar_idx):
+        if _event_bar(w) != int(bar_idx):
             continue
         info = seq_info.get(wt)
         if info is None or info.index_in_trend is None:

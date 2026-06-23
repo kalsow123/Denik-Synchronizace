@@ -118,6 +118,13 @@ from strategy.ext_logic import (
 )
 from core.trading_days import business_time_delta
 from backtest.position_cap import apply_pending_prune, enforce_market_overflow
+from backtest.causal_policy import (
+    bos_flip_wave_at_bar,
+    causal_debug_summary,
+    policy_from_cfg,
+    retro_bos_entry_allowed,
+    wave_for_entry_at_bar,
+)
 from backtest.adx14_gate_sim import Adx14BacktestSim
 from strategy.wick_fakeout import (
     WAVE_ORIGIN_NORMAL,
@@ -381,6 +388,8 @@ class BacktestEngine:
         # Sleduje, kterym BOS vlnam uz proslo "retro" otevreni — at se na
         # dalsich barech (po flipu) neopakuje.
         self._retro_bos_attempted: set[str] = set()
+        self._causal_policy = policy_from_cfg(cfg)
+        self._run_df: pd.DataFrame | None = None
 
     def run(
         self, df: pd.DataFrame, *, retain_wave_snapshot: bool = False
@@ -519,6 +528,7 @@ class BacktestEngine:
         cfg = self.cfg
         df = df.reset_index(drop=True)
         self._run_df = df
+        self._causal_policy = policy_from_cfg(self.cfg)
         self._ohlc = ohlc_from_dataframe(df)
         self._wf_resume_cache: dict = {}
         self.signal_key_digits = self._infer_signal_key_digits(df)
@@ -968,18 +978,39 @@ class BacktestEngine:
             bos_wave = self._bos_flip_wave_by_bar.get(i)
             if bos_wave is not None and _wave_is_wf_origin(bos_wave):
                 bos_wave = None
+            if bos_wave is not None and self._causal_policy.enabled:
+                bos_wave = bos_flip_wave_at_bar(
+                    self._causal_policy,
+                    self._bos_flip_wave_by_bar,
+                    i,
+                    self.wave_birth_by_time,
+                )
             if bos_wave is not None:
                 bos_wt = str(bos_wave.get("wave_time", "") or "")
+                birth_ix = self.wave_birth_by_time.get(bos_wt)
                 if bos_wt and bos_wt not in self._retro_bos_attempted:
-                    self._retro_bos_attempted.add(bos_wt)
-                    self._process_new_wave(
-                        bos_wave,
-                        i,
-                        bar_time,
-                        bar,
-                        bypass_trend_filter=True,
-                        is_two_sided_mirror=False,
-                    )
+                    if retro_bos_entry_allowed(
+                        self._causal_policy,
+                        wave=bos_wave,
+                        flip_bar=i,
+                        birth=birth_ix,
+                    ):
+                        self._retro_bos_attempted.add(bos_wt)
+                        entry_wave = wave_for_entry_at_bar(
+                            self._causal_policy,
+                            bos_wave,
+                            i,
+                            df,
+                            cfg,
+                        )
+                        self._process_new_wave(
+                            entry_wave,
+                            i,
+                            bar_time,
+                            bar,
+                            bypass_trend_filter=True,
+                            is_two_sided_mirror=False,
+                        )
 
             # Trigger pending az PO vytvoreni novych orderu na tomto baru (two-sided
             # LIMIT muze fillnout jeste na stejnem baru).
@@ -1368,6 +1399,10 @@ class BacktestEngine:
         Vraci True pokud byl vytvoren pending nebo market vstup.
         """
         cfg = self.cfg
+        if self._causal_policy.enabled and self._run_df is not None:
+            wave = wave_for_entry_at_bar(
+                self._causal_policy, wave, bar_idx, self._run_df, cfg,
+            )
         sig_key = get_signal_key(wave, digits=self.signal_key_digits)
         # Mirror pozice se musi odlisit od originalu (jinak by ji deduplikace
         # se sent_signals zablokovala). Pridame sufix "_M" k sig_key.
@@ -1992,7 +2027,10 @@ class BacktestEngine:
 
     def get_run_info(self) -> dict:
         """Diagnosticke informace o zpracovani vln a tvorbe orderu."""
-        return dict(self.wave_debug)
+        out = dict(self.wave_debug)
+        if self._causal_policy.enabled:
+            out.update(causal_debug_summary(self._causal_policy))
+        return out
 
     def _adx14_entries_allowed(self) -> bool:
         if self.adx14_sim is None or not self.adx14_sim.active:

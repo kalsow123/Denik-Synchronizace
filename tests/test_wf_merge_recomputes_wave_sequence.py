@@ -33,7 +33,7 @@ def _testing_cfg() -> tuple[dict, BotConfig]:
 
 
 def _segment_df() -> pd.DataFrame:
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     return df[

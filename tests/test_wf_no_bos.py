@@ -191,7 +191,7 @@ def test_engine_mar4_wf_no_bos_in_freeze_or_attribution():
 
     cfg = LIVE_BOT_CONFIG
     df = pd.read_csv(
-        "data/EURUSD.x_M30.csv", parse_dates=["datetime"]
+        "data/EURUSD_M30.csv", parse_dates=["datetime"]
     ).rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-03-05")].reset_index(
         drop=True

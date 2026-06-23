@@ -98,6 +98,18 @@ def merge_wf_continued_classic_waves(
                 break
         _apply_wave_plus_extend(df, cfg, waves, start_idx=start_idx, ohlc=ohlc)
 
+    # Propaguj births WF vlny + resumed klasickych vln zpet do volajiciho
+    # wave_birth_by_time (jinak zustane None → birth_bar_gate blokuje vlnu
+    # napořád). Engine to dela analogicky (self.wave_birth_by_time[wwt] = b).
+    if wave_birth_by_time is not None:
+        wf_wt2 = str(wf_wave.get("wave_time", "") or "")
+        if wf_wt2 and wf_wt2 not in remove_times and wf_wave.get("draw_right") is not None:
+            wave_birth_by_time.setdefault(wf_wt2, int(wf_wave["draw_right"]))
+        for w in continued:
+            wwt = str(w.get("wave_time", "") or "")
+            if wwt and wwt in continued_birth:
+                wave_birth_by_time.setdefault(wwt, int(continued_birth[wwt]))
+
     return remove_times
 
 

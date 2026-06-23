@@ -246,6 +246,8 @@ PROFILES["EXAMPLE"] = {
             "date_from": ["2025-05-10"],
             "date_to"  : ["2025-11-09"],
             "timeframe": ["M30"],
+            "causal_mode": [False],
+            "run_e2e_parity": [False],
             "wave_min_pct": [0.26],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -321,6 +323,8 @@ PROFILES["EXAMPLE"] = {
             "date_from": ["2025-05-10"],
             "date_to"  : ["2025-11-09"],
             "timeframe": ["M30"],
+            "causal_mode": [False],
+            "run_e2e_parity": [False],
             "wave_min_pct": [0.26],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -396,6 +400,8 @@ PROFILES["EXAMPLE"] = {
             "date_from": ["2025-05-10"],
             "date_to"  : ["2025-11-09"],
             "timeframe": ["M30"],
+            "causal_mode": [False],
+            "run_e2e_parity": [False],
             "wave_min_pct": [0.26],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -471,6 +477,8 @@ PROFILES["EXAMPLE"] = {
             "date_from": ["2025-05-10"],
             "date_to"  : ["2025-11-09"],
             "timeframe": ["M30"],
+            "causal_mode": [False],
+            "run_e2e_parity": [False],
             "wave_min_pct": [0.26],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -546,6 +554,8 @@ PROFILES["EXAMPLE"] = {
             "date_from": ["2025-05-10"],
             "date_to"  : ["2025-11-09"],
             "timeframe": ["M30"],
+            "causal_mode": [False],
+            "run_e2e_parity": [False],
             "wave_min_pct": [0.26],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -626,6 +636,8 @@ PROFILES["testing"] = {
             "date_from": ["2024-05-10"],    # "2024-05-10" , "2025-05-10"
             "date_to":   ["2026-06-10"],    # "2025-10-10" , "2026-06-10"
             "timeframe": ["M30"],
+            "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
+            "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": [0.26],
@@ -720,6 +732,8 @@ PROFILES["bot_optimalisation"] = {
             "date_from": ["2026-01-01"],
             "date_to": ["2026-05-10"],
             "timeframe": ["M30"],
+            "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
+            "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": [0.29],
@@ -840,6 +854,8 @@ PROFILES["positions_setting"] = {
             "date_from": ["2026-03-03"],
             "date_to": ["2026-05-10"],
             "timeframe": ["M30"],
+            "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
+            "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": [0.26],
@@ -932,6 +948,8 @@ PROFILES["full_grid"] = {
         {
 # ============== MARKET SETTING ==============
             "timeframe": ["M30"],
+            "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
+            "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": arange(0.18, 0.34, 0.02),

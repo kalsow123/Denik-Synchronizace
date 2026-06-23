@@ -30,7 +30,9 @@ def test_apply_keeps_engine_counter_routing():
     assert cfg.bos_entry_enable is False
 
 
-def test_guard_blocks_non_wave_and_two_sided():
+def test_guard_blocks_only_mirror_and_post_ext():
+    """Parita s backtest WAVE reportem: EXT-primarni i BOS-retro jsou WAVE -> POVOLENO.
+    Potlaci se jen two_sided mirror (WAVE_TWO_SIDED) a post_ext_trend_suppressed."""
     cfg = resolve_live_execution_config(LIVE_BOT_CONFIG)
     ext = {
         "wave_time": "202601011000",
@@ -40,8 +42,10 @@ def test_guard_blocks_non_wave_and_two_sided():
         "move_pct": 0.8,
         "is_ext": True,
     }
-    assert guard_live_send_order(cfg, ext) is True
-    assert guard_live_send_order(cfg, ext, bypass_trend_filter=True) is True
+    # EXT-primarni vlna = WAVE v backtestu -> live ji posila (neblokuje)
+    assert guard_live_send_order(cfg, ext) is False
+    # BOS-retro (bypass_trend_filter) = WAVE v backtestu -> live ji posila
+    assert guard_live_send_order(cfg, ext, bypass_trend_filter=True) is False
     plain = {
         "wave_time": "202601011000",
         "dir": 1,
@@ -50,7 +54,12 @@ def test_guard_blocks_non_wave_and_two_sided():
         "move_pct": 0.30,
     }
     assert guard_live_send_order(cfg, plain) is False
+    assert guard_live_send_order(cfg, plain, bypass_trend_filter=True) is False
+    # two_sided mirror = WAVE_TWO_SIDED -> stale blokovano
     assert guard_live_send_order(cfg, plain, is_two_sided_mirror=True) is True
+    # post_ext_trend_suppressed = vlna neexistuje -> blokovano
+    suppressed = dict(plain, post_ext_trend_suppressed=True)
+    assert guard_live_send_order(cfg, suppressed) is True
 
 
 def test_skip_blocks_counter_ext_two_sided():
@@ -81,3 +90,55 @@ def test_snapshot_filter_wave_only():
     out = filter_wave_only_pending_snapshots(cfg, snaps)
     assert len(out) == 1
     assert out[0].comment == "W202601011000"
+
+
+def test_wave_id_from_comment_parses_ts2_prefix():
+    from infra.trade_tracker import _wave_id_from_comment
+    from runtime.two_sided_promote_live import on_bos_flip_promote_two_sided
+
+    assert _wave_id_from_comment("TS2_202603250100") == "202603250100"
+    promoted = on_bos_flip_promote_two_sided(
+        flipped=True,
+        existing_promoted=set(),
+        open_comments=["TS2_202603250100", "W202601011000"],
+    )
+    assert promoted == {"202603250100"}
+
+
+def test_study_ts2_limit_lot_entry_ref_uses_bar_open():
+    from strategy.two_sided import study_ts2_limit_lot_entry_ref
+
+    # SELL same-bar fill: actual = max(ep, open) — parita engine _trigger_pending
+    ep = 1.160747
+    lot_ep = study_ts2_limit_lot_entry_ref(
+        ep,
+        is_buy=False,
+        bar_open=1.16201,
+        decision_ask=1.1623,
+        decision_bid=1.16228,
+    )
+    assert lot_ep == 1.16201
+
+
+def test_study_ts2_mirror_uses_wick_sl_by_default():
+    from config.bot_config import BotConfig
+    from strategy.two_sided import (
+        prepare_ts2_mirror_entry_signal,
+        prepare_two_sided_counter_signal,
+    )
+
+    wave = {
+        "dir": 1,
+        "fib50": 1.10,
+        "sl": 1.08,
+        "box_bottom": 1.05,
+        "box_top": 1.15,
+        "wave_time": "202601011000",
+    }
+    cfg = BotConfig(
+        live_study_two_sided_mirror_orders=True,
+        live_study_promoted_two_sided_as_wave=True,
+    )
+    sig = prepare_ts2_mirror_entry_signal(wave, cfg)
+    wick_sig = prepare_two_sided_counter_signal(wave, cfg)
+    assert sig["sl"] == wick_sig["sl"] == 1.05

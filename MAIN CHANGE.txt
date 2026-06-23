@@ -353,3 +353,568 @@ Pravidla:
   scripts/e2e_live_broker_sim.py — hlavní parity harness
   scripts/live_replay_parity.py — placement parity
   MAIN CHANGE.txt               — tento dokument (tvrzení k ověření)
+
+
+===================================================================
+11. OPRAVA EXIT VRSTVY (2026-06-22) — PROVEDENO + OVĚŘENO
+===================================================================
+
+11.1 PŘÍČINA (lokalizována bar-po-baru, ne odhad)
+-------------------------------------------------
+Na 132 SPOLEČNÝCH vlnách byl PnL gap −13 880 USD. Rozpad přes E2E ukázal
+dvě nezávislé příčiny:
+  - Příčina 1 (trend-source):  7 vln, −3 892 USD
+      Live (detect_waves, 431 vln) a engine (run_pine_wave_simulation, 398 vln)
+      mají na 138/6148 barech (5 oken) jiný trend → jiné BOS okno.
+  - Příčina 2 (fill/exit):    125 vln, −9 988 USD  ← TADY je 72 % peněz
+
+Příčina 2 — KONKRÉTNÍ BUG:
+  infra/orders.py::close_positions_by_direction (per-bar BOS exit, volá se každý
+  bar) měla ochranu flip-followerů (EXT-primary WAVE / WAVE_COUNTER / TWO_SIDED /
+  EXT_COUNTER) podmíněnou `dir != direction`. Tato funkce ale iteruje JEN pozice
+  rozbitého směru (dir == direction), takže podmínka byla VŽDY False → ochrana
+  flip-followerů se NIKDY nespustila → live je usekával per-bar.
+  Engine je per-bar DRŽÍ (should_close_trade_on_bos_flip flipped=False → False)
+  a zavře je až na skutečném BOS flipu.
+
+  Důkaz (vlna 202601201530, EUR USD): EXT-primary BUY (EWP_), fill bar 2445 v bear.
+    - Engine: drží přes bear (2446–2490), na bull flipu 2491 se "odměkne" (is_ext→
+      False) a veze se na TP_WAVE_N @2552 = +2 348 USD.
+    - Live (před fixem): usekne na BOS @2446 = −122 USD.
+
+11.2 OPRAVA (2 koordinované změny v infra/orders.py)
+----------------------------------------------------
+  (1) close_positions_by_direction:
+      Ochrana flip-followerů per-bar je nyní bezpodmínečná pro per-bar BOS
+      (reason != "EXT_BOS_CLOSE"). Flip-follower se per-bar drží (SL řeší broker),
+      parita s engine should_close_trade_on_bos_flip(flipped=False)→hold.
+  (2) close_flip_follower_positions_on_bos:
+      Odebrán skip `if pos_dir == broken_dir: continue`. Flip-followery v broken_dir
+      se teď zavírají TEPRVE zde na skutečném flipu (dřív to dělal per-bar close).
+  POZN.: EXT_BOS_CLOSE větev (ext_live.py) beze změny.
+  POZN.: stejný kód používá produkční runtime/live_loop.py i runtime/missed_bar_replay.py
+         → oprava platí pro reálný live, ne jen E2E.
+
+11.3 OVĚŘENÍ (E2E, E2E_FIRE_ON_BIRTH=1)
+---------------------------------------
+                          PŘED fixem      PO fixu       zlepšení
+  common (132 vln) delta  −13 880         −3 475        +10 405
+    - Příčina 1 (trend)   −3 892          −2 070        +1 822
+    - Příčina 2 (fill/ex) −9 988          −1 405        +8 583
+  Live na 125 vlnách Příčiny 2:  +11 128  →  +19 711
+
+  GLOBÁLNÍ (všechny WAVE vlny, OFICIÁLNÍ harness scripts/e2e_live_broker_sim.py
+            — správná live-isolation konfigurace):
+    TOTAL PnL:  BT = 39 041   LV = 21 145   delta = −17 895
+                (před fixem LV ~ +11k → exit fix přidal ~ +10k)
+    common=132 (delta −3 475)  BT-only=32 (+14 876, live NEOTEVŘEL)  LV-only=26 (+456)
+    POZN.: zbylý gap −17 895 je TÉMĚŘ CELÝ entry routing (BT-only +14 876),
+           NE exit vrstva. Exit fix svou část (common −13 880 → −3 475) odvedl.
+    POZN.: dřívější tvrzení "LV 36 891 / delta −2 150" bylo CHYBNÉ — pomocný skript
+           _diag_final_summary.py běžel omylem s engine (plný routing) configem
+           místo live-isolation, čímž nafoukl LV-only. Platí čísla z oficiálního harnesu.
+
+  DDi (WAVE-only equity vs initial 100k, oficiální harness):
+    max_drawdown_pct:  BT −6.14   LV −5.04
+    max_ddi_pct:       BT −6.14   LV −4.54
+    p90_ddi_pct:       BT −4.93   LV −3.75
+    dny porušení 5 %:  BT 17      LV 0
+    (Live má NIŽŠÍ drawdown, ale protože obchoduje menší/jinou množinu —
+     neotevírá 32 ziskových BT-only vln. Není to "bezpečnější" v matched smyslu.)
+
+11.4 TESTY
+----------
+  tests/test_ext1_live_logs.py + tests/test_ext_live_parent_wave_protect.py: 7 passed.
+  - test_ext1_protect_allows_ext_counter_bos_close_broken_dir PŘEPSÁN na engine-
+    aligned kontrakt → test_ext_counter_broken_dir_held_per_bar_closed_on_flip
+    (per-bar drží n==0; flip zavře n==1). Starý test kódoval právě tu divergenci.
+  - 2 selhání (EXT1_PROTECT_END_BETTER_RRR_TP) jsou NESOUVISEJÍCÍ s opravou
+    (funkce ext1_protect_live.py nevolá změněné funkce) — padají na rozdílu dat
+    poskytovatele (EURUSD_M30.csv vs .x), ne na logice.
+  - V testech opravena hardcoded cesta data/EURUSD.x_M30.csv → data/EURUSD_M30.csv.
+
+11.5 CO ZBÝVÁ (mimo exit vrstvu)
+--------------------------------
+  - Entry routing stále diverguje: 32 BT-only + 54 LV-only (PnL se zhruba vyruší,
+    ale množiny pozic se liší). To je vstupní vrstva (vč. look-ahead), ne exit.
+  - Příčina 1 (trend-source, −2 070): vyžaduje sjednocení detektoru vln
+    (detect_waves vs pine_sim) — architektonický zásah, malý výnos.
+  - DDi po opravě nebyla samostatně přeměřena (oprava posouvá držení pozic SMĚREM
+    k engine, takže DDi by se měla přiblížit engine — doporučeno doměřit).
+
+
+12. BOD 1 — ROZPAD 32 BT-ONLY VLN (entry routing, +14 876)
+==========================================================
+Skript: scripts/_diag_btonly_split.py (E2E_FIRE_ON_BIRTH=1).
+Pro každou ze 32 vln, které backtest OTEVÍRÁ a live NE, zjištěna PŘÍČINA:
+  - LOOK_AHEAD      = engine vstup PŘED narozením vlny (entry_bar < birth_bar)
+  - NOT_IN_DETECT   = vlna není v live detect_waves (jen v engine pine_sim)
+  - GATED:<branch>  = vlna v detect_waves, ale live ji zahodil (trend/two-sided)
+
+  Kategorie                       vln   PnL(BT)   dosažitelné na live?
+  --------------------------------------------------------------------
+  GATED:trend_filter               12   +9 490    NE bez sjednocení trend-state
+  NOT_IN_DETECT                     6   +5 468    NE bez sjednocení detektoru vln
+  LOOK_AHEAD                        9     +903    NE — kauzálně nemožné (look-ahead)
+  GATED:two_sided_primary           4     −484    NEMÁ smysl (ztrátové, live správně skip)
+  UNKNOWN                           1     −500    NEMÁ smysl (ztrátové)
+  --------------------------------------------------------------------
+  CELKEM                           32  +14 877    (≈ +14 876, sedí)
+
+12.1 ZÁVĚR DOSAŽITELNOSTI
+-------------------------
+  (a) KAUZÁLNĚ NEMOŽNÉ (look-ahead): 9 vln / +903.
+      Backtest vstupuje na flip baru DŘÍV, než vlna vznikne. Live to nikdy
+      nemůže replikovat → nutno akceptovat jako artefakt backtestu (reference).
+  (b) DETEKTOR / TREND DIVERGENCE: 18 vln / +14 958
+      (trend_filter +9 490 + not_in_detect +5 468).
+      Live používá detect_waves + compute_trend_states_per_bar, engine používá
+      run_pine_wave_simulation. Tyto vlny by šly "získat" JEN sjednocením
+      detektoru/trendu — což je ale TÝŽ mechanismus, který plodí look-ahead.
+      Vysoké riziko: rozbil by 132 společných vln + zanesl by ne-kauzální chování.
+  (c) ZTRÁTOVÉ vlny, které live SPRÁVNĚ NEbere: 5 vln / −984
+      (two_sided_primary −484 + unknown −500). Přidat je = SNÍŽIT live PnL.
+
+  POINT: z "chybějících" +14 876 je jen ~ +14 958 teoreticky dosažitelné, ale
+  pouze za cenu sjednocení detektoru (riskantní, ne-kauzální). +903 je nemožné,
+  −984 je dokonce žádoucí NEbrat. Čistá kauzálně-bezpečná dosažitelnost ≈ 0.
+
+12.2 KONCENTRACE
+----------------
+  3 vlny tvoří +12 689 (85 %) celého gapu:
+    202603250100  +6 122  (trend_filter)
+    202603310430  +3 340  (not_in_detect)
+    202603051030  +3 227  (not_in_detect)
+  Tj. gap NENÍ plošný routing bug, ale pár velkých vln, kde se engine pine_sim
+  a live detect_waves rozešly v tom, ZDA/KDY vlna existuje a jaký je trend.
+
+
+13. PRŮZKUM 3 VELKÝCH VLN — KAUZALITA (skripty _diag_3waves_*, _diag_wf_birth_bug)
+=================================================================================
+ZÁVĚR: ŽÁDNÁ ze 3 velkých vln není look-ahead. Všechny mají
+       entry_bar >= birth_bar >= draw_right (kauzálně legitimní v enginu).
+       Rozkol je v tom, jak LIVE získává/gatuje vlny po WF re-seedu.
+
+13.1 KLÍČOVÉ ZJIŠTĚNÍ — detektor je SHODNÝ
+------------------------------------------
+  detect_waves_pine (live) i engine volají TÚŽ funkci run_pine_wave_simulation
+  (přes cache). Po každé WF (wick-fakeout) vlně oba RE-SEEDUJÍ klasickou Pine
+  detekci od draw_right+1 (resume_classic_waves_after_wf) → vznikají
+  "wf_continued_classic" vlny mimo monolitický detect_waves(full df).
+
+13.2 NALEZENÝ LIVE BUG — WF-continued-classic births se NEREGISTRUJÍ
+--------------------------------------------------------------------
+  strategy/wf_wave_list.py::merge_wf_continued_classic_waves si staví LOKÁLNÍ
+  birth dict (ř. 51, plní ř. 90 birth[wwt]=continued_birth[wwt]), ale NIKDY ho
+  nevrací — vrací jen remove_times. Volající (runtime/wf_live.py::_build_activation
+  i run_e2e i runtime/live_loop.py ř. 1325-1331) drží `wave_birth` z
+  compute_wave_birth_bars_pine (monolitický) → continued-classic births tam
+  CHYBÍ → wave_birth_by_time[wt] = None → _apply_birth_bar_gate blokuje vlnu na
+  KAŽDÉM baru napořád (trace: "skip:birth_bar_gate birth=None" 6000+x).
+  Engine to dělá správně: self.wave_birth_by_time[wwt] = b při mergi.
+  DOPAD: postihuje i PRODUKČNÍ live_loop.py, ne jen E2E.
+  STATUS: kauzálně-bezpečně OPRAVITELNÉ (birth bar je znám z forward re-seedu).
+
+13.3 ROZPAD 32 BT-only dle příčiny (post-WF stav)
+-------------------------------------------------
+  WF_BIRTH_BUG (birth=None, opravitelné):   4 vln  +5 905
+     202603310430 +3340, 202603051030 +3227, 202602031300 -500, 202604301800 -162
+     (2 výherci +6 567, 2 ztráty -662)
+  post-WF známá, blokuje jiný gate:        25 vln  +9 906
+     mj. 202603250100 +6122 — blokuje TREND_FILTER (wave_against_trend):
+     live trend=bull na birth baru 4571, engine trend dovolil short.
+     = trend-state divergence po WF re-seedu (NE birth bug, těžší).
+     zbytek = trend_filter / too_old / two_sided / look-ahead (mix).
+  jiné (mimo post-WF):                       3 vln    -938
+     202602040600, 202603170900, 202602162330 (truly absent / jiná detekce; net záporné)
+
+13.4 3 VELKÉ VLNY (85 % gapu) — verdikt
+---------------------------------------
+  202603310430 (+3340): WF_BIRTH_BUG  → OPRAVITELNÉ (čistý fix)
+  202603051030 (+3227): WF_BIRTH_BUG  → OPRAVITELNÉ (čistý fix)
+  202603250100 (+6122): trend-state divergence po WF re-seedu → těžší,
+                         nutno ověřit, zda engine trend není legitimně jiný
+                         (live compute_trend_states_per_bar vs engine inkrementální
+                         recompute_trend_states_per_wave_from_bar po re-seedu).
+
+13.5 DOPORUČENÍ
+---------------
+  1) Opravit WF birth registraci (propagovat continued_birth do volajícího
+     wave_birth_by_time) — čistá, kauzální oprava. Odhad zisku ~+6 567 (2 výherci),
+     ale POZOR: 4 vlny vč. 2 ztrátových → nutno přeměřit E2E PnL/DDi po fixu.
+  2) Trend-state divergence (202603250100 +6122) řešit zvlášť — vyžaduje
+     sjednocení live per-bar trendu s engine post-reseed recompute. Vyšší riziko.
+
+
+14. PROVEDENÁ OPRAVA — WF birth registrace (bod 1)
+==================================================
+ZMĚNY:
+  - strategy/wf_wave_list.py::merge_wf_continued_classic_waves: na konci propisuje
+    births WF vlny + resumed klasických vln do předaného wave_birth_by_time
+    (setdefault) → caller (live_loop/run_e2e) má kompletní birth mapu.
+  - runtime/wf_live.py::_build_activation + process: předává SDÍLENOU birth mapu
+    (dřív čerstvá throwaway compute_wave_birth_bars_pine → births se ztrácely).
+  - tests: opravena cesta data/EURUSD.x_M30.csv → data/EURUSD_M30.csv ve
+    test_wf_merge_recomputes_wave_sequence.py a test_wf_no_bos.py.
+
+OVĚŘENÍ:
+  - ENGINE NEDOTČEN: BT WAVE = 164 / 39 040.9 USD (identické). Engine volá tutéž
+    funkci s wave_birth_by_time=self.wave_birth_by_time a births stejně přepisuje
+    explicitně (engine.py 1330-1336), takže setdefault je no-op navíc.
+  - births se nyní registrují: 202603051030→3919, 202603310430→4768 (dřív None).
+  - WF testy: 8 passed (test_wf_merge_* + test_wf_no_bos). 1 pre-existující fail
+    (test_ghost_hh_hl_fail_skips_index — compute_wave_sequence_info_per_wave,
+     nesouvisí s opravou, odkryto opravou cesty).
+
+DŮSLEDEK (důležité):
+  Birth fix SÁM cílové vlny NEODEMKNE. Po registraci birth narazí všechny 3 velké
+  vlny (202603250100/310430/051030) na skip:trend_filter "wave_against_trend" na
+  birth baru → to je SKUTEČNÝ blokér = bod 2 (trend-source divergence).
+  Birth byl jen maskující první gate.
+
+  E2E PO opravě: LV = 20 364 (z 21 145, delta −781), common=133, BT-only=31,
+  LV-only=28. Mírný pokles: birth fix pustil přes birth_bar_gate i pár jiných
+  WF-continued vln (net ztrátové LV-only). OČEKÁVÁ SE OBRAT po sjednocení trendu
+  (bod 2), které odemkne 3 velké vlny (+~12k).
+
+
+15. PROVEDENÁ OPRAVA — BOD 2: trend-source / wave-set unifikace
+================================================================
+ROOT CAUSE:
+  Live WfLiveRuntime.process měla STALE waves_by_bar (spočtené jednou na začátku).
+  Po WF aktivaci a merge continued-classic vln se waves_by_bar NEAKTUALIZOVALA →
+  WF tracker dál dostával ODSTRANĚNÉ base vlny → jiné následné WF aktivace →
+  live držel 412 vln místo enginových 398. To kaskádovitě měnilo index_in_trend
+  a trend direction.
+
+ZMĚNA (runtime/wf_live.py::_build_activation + process):
+  Po merge_wf_continued_classic_waves se waves_by_bar aktualizuje stejně jako
+  engine (_merge_wf_continued_classic_waves, engine.py 1309-1336): odebere
+  remove_times, přidá continued vlny na jejich birth bary. _build_activation +
+  process dostávají sdílenou waves_by_bar mapu.
+
+OVĚŘENÍ (scripts/_diag_trend_source.py):
+  PŘED:  detect(pre-WF)=431  live(post-WF)=412  engine=398
+         jen-engine=8  jen-live=22  trend-dir rozdílů=13
+  PO:    detect(pre-WF)=431  live(post-WF)=398  engine=398   (PŘESNÁ SHODA)
+         jen-engine=0  jen-live=0  trend-dir rozdílů=0
+  - Engine NEDOTČEN (BT 39 040.9). Regrese: 0 (baseline 11 fail = po změně 11 fail,
+    vše pre-existující .x data path).
+
+DOPAD: common delta −3 475 → −2 246 (+1 229). Celkové LV 21 145 → 24 829 (+3 684).
+
+
+16. BOD 3 — exit timing: ŽÁDNÝ SYSTÉMOVÝ BUG (rozpad common −2 246)
+===================================================================
+scripts/_diag_exit_timing.py rozpad 132 společných vln:
+  shoda (<5 USD):                  108 vln   delta   −134   (silná parita)
+  reason mismatch (live LÍP):        5 vln   delta +1 938
+  EXT_BOS_CLOSE (engine-only):       5 vln   delta   +896   (live dělá líp)
+  jine (entry/EP):                  12 vln   delta −2 620
+  stejný reason, jiný close_bar:     2 vln   delta −2 325
+
+ZÁVĚR: není jednosměrný opravitelný exit bug. Reziduum tvoří:
+  1) LOOK-AHEAD retro entry enginu — největší položka 202601300400 (−2 929):
+     engine vstupuje retro-BOS na flip baru 2745, tj. 7 barů PŘED narozením vlny
+     (birth=2752); live kauzálně nemůže (trace: "retro:birth_ge_bar birth=2752" →
+     SENT_PRIMARY až na birth baru). NEOPRAVITELNÉ.
+  2) Rozptýlený OBOUSMĚRNÝ BOS close_bar timing (intrabar fill model tick-replay
+     vs bar-close engine) — část vln live líp, část hůř, net malý.
+  3) EXT-1/E23 protekce — engine-only, live MT5 broker ji nemá (záměrně); live tu
+     paradoxně vydělá víc (+896).
+  Forsírovaná změna by buď replikovala look-ahead (nelze/nesprávné), nebo ladila
+  intrabar fill (riziko, obousměrné). Bez čistého zisku → NEMĚNĚNO.
+
+
+17. ANALÝZA POSLEDNÍ SLOŽITÉ POZICE — 202603250100 (+6 122)
+===========================================================
+FAKTA (scripts/_diag_3waves_causality.py + instrumentace enginu):
+  - Vlna detekována IDENTICKY v enginu i live: dl=4562 dr=4566 w_dir=-1 (SHORT),
+    birth_bar=4571.
+  - Per-wave trend = BULL v OBOU. wave_allowed_for_entry = (False, wave_against_
+    trend) v OBOU. Vlna NENÍ ve finálním _bos_wave_times v žádném.
+  - Engine PŘESTO vstupuje: LIMIT, origin=normal, entry_bar=4571, +6122 (TP_WAVE_N).
+
+MECHANISMUS (engine.py 965-982):
+  Instrumentace ukázala vstup s bypass_trend_filter=True na baru 4571. To je cesta
+  "BOS-vlna retro-aktivace": na baru i engine vezme self._bos_flip_wave_by_bar[i]
+  (vlna, která způsobila CLOSE-BASED BOS flip na baru i) a otevře ji s obejitím
+  trend filtru. Tj. _bos_flip_wave_by_bar[4571] == 202603250100 V OKAMŽIKU baru
+  4571 (mapa je DYNAMICKÁ — po běhu už ji neobsahuje, discard ř. 1213/1230, proto
+  ji statická diagnostika neviděla).
+
+  → close-based flip na baru 4571 = close baru 4571 prorazil předchozí strukturu
+    dolů. KAUZÁLNÍ (jen data ≤ 4571). NENÍ look-ahead.
+
+PROČ LIVE NEVSTOUPÍ:
+  Live close-based BOS flip detekce (_detect_close_bos_timeline_flips /
+  compute_bos_wave_flip_map / reconcile_bos_flip_map_with_wave_sequence)
+  NEklasifikuje 202603250100 jako flip-causing vlnu na baru 4571 → live nemá
+  retro-BOS vstup → trend_filter (bull vs short) → vlna zestárne (too_old).
+
+ZÁVĚR: KAUZÁLNĚ OPRAVITELNÉ (engine používá jen data ≤ 4571). Jde o divergenci
+  v close-based BOS-flip-map rekonciliaci — DALŠÍ VRSTVA po unifikaci wave-set+
+  trend-dir (bod 2). Riziko vyšší (mění BOS-flip identifikaci → ovlivní retro
+  vstupy plošně). Doporučení: sjednotit live flip-map s enginovou inkrementální
+  verzí jako samostatný krok s plnou E2E regresí.
+
+
+18. E2E FIDELITY AUDIT + KONTROLA ZAPNUTÝCH FUNKCÍ
+===================================================
+Zadání: (a) ověřit že E2E odpovídá chodání bota; (b) najít zapnutou funkci, která
+kazí fungování / je napojená na engine místo live a šla by předělat pro performance.
+
+A) COUPLING LIVE ↔ BACKTEST ENGINE — ČISTÉ
+   rg přes runtime/ infra/: ŽÁDNÝ live modul neimportuje BacktestEngine ani
+   backtest.engine v kódu (jen docstring "parita s backtest.engine" poznámky).
+   Live používá SDÍLENÉ strategy/ funkce (detect_waves, compute_bos_wave_flip_map,
+   trend_bos, ext_logic…) — to je správná architektura, ne coupling. → OK, neměnit.
+
+B) E2E_FIRE_ON_BIRTH — birth vs draw_right divergence (ZMĚŘENO, malé)
+   runtime/wave_target_n_bar.py:75 čte env E2E_FIRE_ON_BIRTH:
+     =1  → TP_WAVE_N event na BIRTH baru
+     jinak (PRODUKCE — live_loop ho NENASTAVUJE) → na DRAW_RIGHT baru.
+   Engine (backtest): waves_by_bar je klíčované BIRTH (engine.py 555-560),
+   _maybe_fire_tp_wave_event(wave, i) střílí na BIRTH → engine == režim s flagem.
+   ⇒ PRODUKCE (draw_right) se od ENGINE (birth) liší.
+   MĚŘENÍ (E2E celé období):
+     s flagem (birth, = engine):     LV 24 829 USD
+     bez flagu (draw_right, = prod): LV 25 012.71 USD  (common delta jen −741!)
+   ⇒ Dopad ~+184 USD, produkce dokonce NEPATRNĚ LEPŠÍ. NENÍ to funkce kazící
+     performance. Naše dosavadní E2E (s flagem) je produkci věrné v rámci ~184 USD;
+     dřívější závěry platí. Doporučení: NEMĚNIT (volitelně sladit obě cesty na birth
+     kvůli čistotě, ale bez výnosu).
+
+C) PRODUKČNÍ E2E (bez flagu) — rozpad (toto je realita bota):
+     BACKTEST WAVE:  164 obch / 39 040.9 USD   maxDDi −6.14%  dnů>5%: 17
+     LIVE E2E WAVE:  154 obch / 25 012.71 USD   maxDDi −4.89%  dnů>5%:  0
+       common (132):  BT 25 064  LV 24 323  delta  −741   (≈ PARITA)
+       BT-only (32):  +13 977   ← CELÝ zbytek gapu (look-ahead + retro-BOS + trend_filter)
+       LV-only (22):  +690
+   ⇒ Společné vlny jsou prakticky 1:1. Gap = 32 vln, které live KAUZÁLNĚ neotevře
+     (engine look-ahead/retro-BOS) nebo blokuje trend_filter (třída 202603250100).
+
+D) session_enabled=True — ZAPNUTÁ FUNKCE NEMODELOVANÁ v E2E/backtestu
+   Produkce (live_loop.py 1129-1216): bot běží jen v session (01:05-23:45 GMT+3),
+   5 min před close RUŠÍ VŠECHNY PENDINGY (cancel_all_pendings), mimo session SPÍ,
+   weekend pauza, po wake-up RESET (wf_runtime.reset, processed_tp reset, ext sync).
+   Backtest engine session NEAPLIKUJE (rg: žádný session ref v backtest/engine.py),
+   run_e2e prohání KAŽDÝ bar 24/7 bez pre-close cancelu.
+   DŮSLEDEK: pendingy, které backtest/E2E nechá vyplnit přes noc, produkce v 23:40
+   zruší → produkce může brát MÉNĚ vstupů; přes noc/weekend nereaguje na BOS/TP.
+   wave_session_filter (trade filtr vln) je VYPNUTÝ (false), takže to je čistě
+   bot-scheduling efekt, ne filtr vln.
+   STATUS: nekvantifikováno. Pozn.: M30 EURUSD nemá víkendové bary → weekend pauza
+   z větší části bezpředmětná; hlavní efekt = denní pre-close cancel pendingů +
+   ~1.3h noční mezera. Doporučení: volitelně přidat do E2E session-gate pro PŘESNĚJŠÍ
+   produkční odhad (samostatný krok), ale není to bug — je to záměrné chování bota.
+
+E) wave_sim_cache — neomezený růst (potenciální PROD memory concern)
+   backtest/wave_sim_cache._CACHE je unbounded dict klíčovaný (n,t0,t1)+cfg.
+   Při klouzavém okně (produkce i rolling E2E) má každý bar unikátní klíč → cache
+   nikdy nehitne napříč bary, jen roste (deep-copy vln/bar). V dlouhoběžícím live
+   procesu může nabývat. Sledovat / přidat cap nebo periodický clear (mimo rozsah).
+
+F) LOOK-AHEAD VE VSTUPECH — ZMĚŘENO = NULA (cílený test)
+   Plný rolling causal E2E (_e2e_causal.py) má perf vadu HARNESS (stateful WF/ext
+   runtime akumulují stav přes tisíce process() volání → decelerace 5→1.8 bar/s,
+   3h+; v produkci neviditelné: 1 bar/30 min + reset na session wake-up). Místo něj
+   PŘÍMÝ test (scripts/_diag_lookahead_check.py):
+   pro každou E2E-obchodovanou vlnu porovnej detekci nad CELÝM df vs nad KAUZÁLNÍM
+   1440-oknem končícím na baru, kde ji bot poprvé vidí (birth). Pine sim je zleva-
+   doprava (kauzální), takže to přímo dokáže/vyvrátí vstupní look-ahead.
+   VÝSLEDEK (E2E obchoduje 154 unik. vln):
+     PŘÍTOMNOST v kauzálním okně:  137/154
+     BIRTH shoda (kauzál == full): 137/137  (VŠECHNY přítomné — 0 chybí, 0 posun)
+     bez base-birth: 17 = WF-continued / EXT (EWP_) vlny konstruované runtimy během
+       E2E (zpracované kauzálně přes birth_bar_gate/too_old/trend) — ne base-detekcí.
+   ⇒ full-df předpočet v run_e2e NEDÁVÁ vstupní look-ahead — vlny se detekují
+     identicky kauzálně. E2E je vstupně VĚRNÉ produkci.
+   Jediný zbylý look-ahead = BOS flip-mapa (retro-BOS, třída 202603250100), což je
+   BT-only vlna (netýká se E2E vstupů, jen BT↔E2E gapu) — viz sekce 17.
+
+
+19. ZÁVĚR AUDITU
+================
+1) E2E ODPOVÍDÁ BOTOVI (vstupně věrné):
+   - 137/137 base-detekovaných obchodovaných vln se reprodukuje kauzálně s přesným
+     birth (0 look-ahead v detekci).
+   - Produkční režim (bez E2E_FIRE_ON_BIRTH): LV 25 012.71 USD, common delta jen
+     −741 (≈ parita); celý zbytek gapu = 32 BT-only vln (+13 977).
+   - Drobné odchylky od produkce: (a) TP-event birth vs draw_right ~184 USD
+     (zanedbatelné, prod nepatrně lépe); (b) session-gate nemodelován.
+2) ŽÁDNÁ ZAPNUTÁ FUNKCE NEKAZÍ PERFORMANCE napojením na engine:
+   - Live nemá kódové coupling na BacktestEngine (jen sdílené strategy/).
+   - E2E_FIRE_ON_BIRTH: ne-problém.
+   - session_enabled: záměrné bot-chování, ne bug; volitelně domodelovat do E2E.
+   - wave_sim_cache: neomezený růst — sledovat (prod memory), netýká se PnL.
+3) GAP BT 39 041 vs PROD-E2E 25 013 (−14 028) NENÍ live bug, ale design:
+   engine look-ahead/retro-BOS na 32 BT-only vlnách (kauzálně neotevíratelné live)
+   + trend_filter blokace třídy 202603250100 (kauzálně OPRAVITELNÉ retro-BOS unifikací).
+4) JEDINÁ KAUZÁLNĚ OPRAVITELNÁ PÁKA na výkon = close-based retro-BOS aktivace
+   (sekce 17). Riziko: mění BOS-flip identifikaci plošně → nutná plná E2E regrese.
+   ČEKÁ NA SCHVÁLENÍ UŽIVATELE.
+
+
+20. FIX #1 (per-bar trend PRE-WF parita) + FIX #2 ANALÝZA (NEIMPLEMENTOVÁNO)
+============================================================================
+
+KONTEXT: Cíl = sladit live E2E s engine na 32 BT-only vlnách. Diag rozdělil:
+  NOT_IN_DETECT  2 vlny +6567  (202603051030 +3227, 202603310430 +3340)  → FIX #1
+  GATED:trend_filter 14 vln +8490 (max 202603250100 +6122)              → FIX #2
+
+----------------------------------------------------------------------------
+FIX #1 — per-bar trend zdroj: PRE-WF snapshot (IMPLEMENTOVÁNO, NET +1971 USD)
+----------------------------------------------------------------------------
+ROOT CAUSE (kauzální, ne look-ahead):
+  Engine počítá trend_states_per_bar JEDNOU nad PRVOTNÍ detect množinou PŘED WF
+  merge (engine.py _recompute_bos_state) a po WF ji už NEAKTUALIZUJE. Live dřív
+  počítal bar-trend nad POST-WF vlnami → 285 barů se lišil SMĚR trendu →
+  fill-bar re-check (entry_allowed_at_fill_bar) blokoval wf_continued_classic
+  vlnu 202603051030 jako wave_against_trend, zatímco engine ji pouští
+  (first_in_trend, bear/SELL). To je čistě rozdíl ZDROJE trendu, oba kauzální.
+
+ZMĚNA (2 soubory, minimální):
+  scripts/e2e_live_broker_sim.py::run_e2e
+    - snapshot _pre_wf_waves = [dict(w) for w in waves] PŘED wf_runtime.process,
+      reapply_ext_range_tags na snapshot (jako engine @593),
+      pre_wf_bar_trend_states = compute_trend_states_per_bar(df, _pre_wf_waves, cfg)
+    - bar_trend_states = pre_wf_bar_trend_states  (místo post-WF waves)
+  runtime/live_loop.py  (PRODUKČNÍ parita — stejný zdroj jako e2e sim)
+    - stejný _pre_wf_waves snapshot PŘED wf_runtime.process
+    - obě compute_trend_states_per_bar(df, waves,...) → (df, _pre_wf_waves,...)
+  Kauzálnost: detect_waves i reapply_ext_range_tags i compute_trend_states_per_bar
+  používají jen data <= aktuální bar. Snapshot = stav PŘED WF mergem, žádný future.
+
+VÝSLEDEK (produkční E2E, bez E2E_FIRE_ON_BIRTH):
+                     PŘED FIX#1        PO FIX#1
+  BACKTEST WAVE:  164 / 39 040.9     164 / 39 040.9   (BEZE ZMĚNY ✓ — engine netknut)
+  LIVE E2E WAVE:  154 / 25 012.71    151 / 26 984.26  (+1971.55 USD)
+  max DDi:           −4.89%            −5.17%
+  common:        132 delta −741     133 delta +1488  (parita ZLEPŠENA o ~2229)
+  BT-only:       32 (+13 977)       31 (+10 749)
+  202603051030:  BT-only            OBCHODOVÁNO live (TP_WAVE_N_W202603051030) ✓
+  202603310430:  BT-only            stále BT-only (two-sided mirror → viz FIX #2)
+  pytest: baseline 38 fail/err == po FIX#1 38 (IDENTICKÁ množina, 0 NOVÝCH)
+
+----------------------------------------------------------------------------
+FIX #2 — close-based retro-BOS: NEIMPLEMENTOVÁNO (architektonicky nemožné kauzálně)
+----------------------------------------------------------------------------
+PŘEHODNOCENÍ MECHANISMU (diag scripts/_diag_btonly_mechanism.py — spy na
+_process_new_wave): zadání předpokládalo retro-BOS bypass, ALE skutečný engine
+mechanismus u cílových trend_filter vln je TWO_SIDED_MIRROR PROMOCE:
+  - engine otevře counter-trend MIRROR na BIRTH baru (bypass=True, mirror=True),
+  - při pozdějším příznivém BOS flipu nastaví trade.is_two_sided_mirror=False
+    (engine.py @2237) → mirror se PŘEKLASIFIKUJE na WAVE → spadne do 164/39k.
+  Klasifikace 32 BT-only dle skutečného mechanismu:
+    TWO_SIDED_MIRROR (promovaný)  10 vln  +12 645  (vč. 202603250100 +6122,
+                                                    202603310430 +3340)
+    NORMAL_allowed                 5 vln   +3 619  (vč. 202603051030 → FIX #1)
+    BYPASS(retro)/blocked         17 vln   NET ZÁPORNÉ  (kauzálně by ŠKODILY)
+
+PROČ NELZE KAUZÁLNĚ & VĚRNĚ V LIVE (wave_isolation_study):
+  1) guard_live_send_order (live_wave_isolation.py:198) BLOKUJE is_two_sided_mirror
+     send — záměr varianty B (na účtu jen WAVE).
+  2) WAVE PnL slice = podle NEMĚNNÉHO MT5 komentáře (is_wave_mt5_comment: "W"+13
+     číslic). Mirror nese "TWO_SIDED" komentář.
+  3) Engine promoce je IN-MEMORY reklasifikace. Na reálném MT5 je komentář pozice
+     NEMĚNNÝ → promovaný mirror by zůstal "TWO_SIDED" → NIKDY by nespadl do WAVE
+     slice. +6122 by se v live WAVE PnL neobjevilo.
+  4) Náhrada čerstvým WAVE vstupem na flip baru = jiný entry bar/cena/SL než engine
+     (engine drží od BIRTH 4571) → jiný (typicky horší) PnL + často už too_old.
+  5) "Vybrat jen ty, co budou promovány" = vyžaduje znát BUDOUCÍ flip → LOOK-AHEAD.
+     Otevřít VŠECHNY mirrory = masivní over-trade counter-trend pozic (riziko).
+  ⇒ Žádná kauzální & věrná cesta. Dle guardrailu (nezhoršit / nenechat rozbitý kód)
+    FIX #2 NEIMPLEMENTOVÁN. Zbytkový gap (live 26 984 vs engine 39 041) je DESIGN
+    wave-isolation (záměrně vylučuje two-sided), ne live bug.
+
+REVERT: nic — FIX #1 ponechán (čistý zisk, engine netknut, 0 nových testů),
+    FIX #2 nikdy nezapsán do produkce.
+
+----------------------------------------------------------------------------
+§22 FIX B+ — two-sided routing PŘED trend_filter + TS2 mirror pipeline (2026-06-23)
+----------------------------------------------------------------------------
+ROOT CAUSE: missed_bar_replay.py spouštěl skip:trend_filter PŘED two-sided blokem
+→ counter-trend vlny s TWO_SIDED_MIRROR nikdy nedostaly TS2_ order (primary blocked,
+mirror neposlán). live_loop.py už měl správné pořadí.
+
+OPRAVY:
+  1) runtime/missed_bar_replay.py — TWO-SIDED routing + TS2_ send PŘED trend_filter
+     na primární WAVE cestě; failed TS2 send → failed_signals (retry), ne sent_signals.
+  2) infra/orders.py — promoted_two_sided_wave_times v close_positions_by_direction /
+     close_flip_follower_positions_on_bos (_position_trade_view: promoted TS2_ = WAVE).
+  3) runtime/live_loop.py + missed_bar_replay.py — předávání promoted set do BOS close.
+  4) scripts/e2e_live_broker_sim.py — B+ report: live WAVE slice zahrnuje TS2_
+     když live_study_two_sided_mirror_orders=True; TS2 count v outputu.
+
+VÝSLEDEK (E2E, live_study_two_sided_mirror_orders=True, default config OFF):
+                     PŘED (B+ broken)   PO §22
+  ENGINE WAVE:       164 / 39 040.9     164 / 39 040.9  (BEZE ZMĚNY ✓)
+  LIVE E2E WAVE:     150 / 26 977       172 / 34 565.61 (+7 588 USD, +22 TS2_)
+  max DDi:           −5.17%             −5.18%
+  p90 DDi:           −4.47%             −4.47%
+  common delta:      +2 473             +2 473 (132 společných wt)
+  BT-only:           32 (+11 658)       45 (TS2_ komentáře mimo W-wave_time match)
+  TS2_ count:        0                  22
+  Klíčová vlna 202603250100 (+6122): TS2_ mirror live ✓ (TP_WAVE_N_TS2_202603250100)
+  trend_filter gap (+8490 gross): ~7 588 USD recovered (22 mirror trades live)
+
+DEFAULT PRODUKCE: live_study_two_sided_mirror_orders=False (beze změny chování).
+
+----------------------------------------------------------------------------
+§23 FIX — TS2_ promote wave_time parsing + TP clear po BOS flip (2026-06-23)
+----------------------------------------------------------------------------
+ROOT CAUSE: `_wave_id_from_comment()` v infra/trade_tracker.py parsoval jen
+`W{12digits}` → u komentáře `TS2_202603250100` vracel None. Důsledky:
+  - `on_bos_flip_promote_two_sided` nikdy nezapsal wave_time → E2E `promoted: 0`
+  - `_position_trade_view` měl prázdný wave_time → promoted set nefungoval v BOS close
+  - `live_wave_stats.position_kind_from_mt5_comment` neklasifikoval promote
+
+OPRAVY:
+  1) infra/trade_tracker.py — `_wave_id_from_comment` deleguje na
+     `wave_time_from_pending_comment` (W, TS2_, CNTR_, EWP_, …).
+  2) runtime/two_sided_promote_live.py + infra/orders.py — po promote vymazat
+     fixní TP u TS2_ (engine @2156: trade.tp = None pro flip-followery co přežijí flip).
+  3) scripts/e2e_live_broker_sim.py — `_clean_wave_time` stejná normalizace (TS2_ strip).
+
+VÝSLEDEK (E2E, B+ ON, bez E2E_FIRE_ON_BIRTH):
+                     PŘED §23 (§22)     PO §23
+  ENGINE WAVE:       164 / 39 040.9     164 / 39 040.9  (BEZE ZMĚNY ✓)
+  LIVE E2E WAVE:     172 / 34 565.61    173 / ~35 472   (+~906 USD)
+  max DDi:           −5.18%             −5.18%
+  promoted count:    0                  11
+  Klíčová vlna 202603250100: promoted=True, stále Δ PnL (lot 2.45 vs BT 6.41)
+  Klíčová vlna 202602192330: promoted=True, dříve BOS místo TP_WAVE_N (TP clear fix)
+
+ZBYVAJÍCÍ GAP (~3 569 USD): lot sizing TS2 mirror vs engine W, BT-only 32 vln.
+pytest: test_live_wave_isolation + combo2 + wf_* — 0 NOVÝCH failů oproti baseline
+  (1 pre-existující fail test_ghost_hh_hl_fail_skips_index_while_in_wave_list).
+
+----------------------------------------------------------------------------
+§24 FIX — TS2 mirror lot sizing parita s engine W-primary (2026-06-23)
+----------------------------------------------------------------------------
+ROOT CAUSE: Live TS2_ používal `prepare_two_sided_counter_signal` → lot z fib50
+(2.45), zatímco engine W-primary u 202603250100 fillnul LIMIT/MARKET s lotem
+po skutečném entry (6.41). Engine `_trigger_pending` přepočítá lot při fillu z
+`actual_entry`; live/E2E ne. U MARKET fallback navíc `abort_shift_sl` posouval
+SL na risk_span → lot ~2.45 místo fib SL.
+
+OPRAVY:
+  1) strategy/two_sided.py — `study_ts2_limit_lot_entry_ref`, `prepare_ts2_mirror_entry_signal`
+  2) infra/orders.py — study TS2: LIMIT lot z bar_open fill odhadu; MARKET bez
+     risk_span shift, lot z `study_ts2_limit_lot_entry_ref` + fib SL
+  3) scripts/e2e_live_broker_sim.py — TS2_ fill_pendings přepočet lotu (engine parita)
+  4) runtime/missed_bar_replay.py + live_loop.py — `bar_open` do send_order
+
+VÝSLEDEK (E2E, B+ ON, bez E2E_FIRE_ON_BIRTH):
+                     PŘED §24 (§23)     PO §24
+  ENGINE WAVE:       164 / 39 040.9     164 / 39 040.9  (BEZE ZMĚNY ✓)
+  LIVE E2E WAVE:     173 / 35 471.58   173 / 36 556.98 (+1 085 USD)
+  max DDi:           −6.68%             −6.69%
+  promoted count:    11                  9
+  Klíčová vlna 202603250100: lot 6.41 ✓ (BT 6.41), PnL LV +7 256 vs BT +6 122
+  Klíčová vlna 202603310430: lot 2.33 ✓, PnL LV +3 295 vs BT +3 340
+  Klíčová vlna 202602192330: lot 3.07 ≈ BT 3.06, stále BOS_EXIT (+123 vs +1 410)
+
+ZBYVAJÍCÍ GAP (~2 484 USD): exit timing (202602192330 BOS), BT-only 22 vln, LV-only.
+pytest: test_live_wave_isolation + combo2 — 31 passed, 0 NOVÝCH failů.

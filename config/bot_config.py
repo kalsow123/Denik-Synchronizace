@@ -60,6 +60,10 @@ class BotConfig:
     symbol:          str   = "EU50p"
     timeframe:       int   = mt5.TIMEFRAME_M30
     wave_min_pct:    float = 0.55
+    # Backtest-only: kauzální brány (retro po birth, clamp EP/SL) — parita s live; grid default False
+    causal_mode: bool = False
+    # Backtest-only: po BT spustit live E2E parity (replay + fake MT5); ne pro grid
+    run_e2e_parity: bool = False
 
     # ============== TP SETTINGS ==============
     rrr:             float = 2.0
@@ -104,6 +108,8 @@ class BotConfig:
     live_mt5_wave_slice_only: bool = False  # runtime: MT5 smi otevírat jen WAVE (apply_live_mt5_wave_slice_execution)
     two_sided_entry_enabled: bool = False
     two_sided_entry_min_wave_pct: float = 0.55
+    live_study_two_sided_mirror_orders: bool = False
+    live_study_promoted_two_sided_as_wave: bool = True
     skip_primary_entry_on_parent_wave_enable: bool = True  # preskocit primarni WAVE vstup na two-sided rodici A; jen protipozice na protivlni B
     wf_enabled: bool = True  # Wick Fakeout Recovery
     pp_enabled: bool = False
@@ -251,9 +257,11 @@ def trade_risk_usd(cfg: BotConfig, *, is_pp: bool = False) -> float:
 
 LIVE_BOT_CONFIG = BotConfig(
     # ============== MARKET SETTING ==============
-    symbol="EURUSD.x",  #L broker suffix (FXPIG)
+    symbol="EURUSD",  #L FTMO/broker symbol (".x"/".r" jsou jen jine nazvy stejneho symbolu)
     timeframe=mt5.TIMEFRAME_M30,
     wave_min_pct=0.26,
+    causal_mode=False,  #L True = backtest bez look-ahead (parita live); False = legacy grid
+    run_e2e_parity=False,  #L True = po BT spustit E2E parity (live_match / --e2e)
     wave_session_filter_enabled=False,
 
     # ============== TP SETTINGS ==============
@@ -280,8 +288,8 @@ LIVE_BOT_CONFIG = BotConfig(
     max_wave_age_hours=20,
 
     # ============== RISK MANAGEMENT ==============
-    risk_usd=300.0,
-    pp_risk_usd=300.0,
+    risk_usd=500.0,
+    pp_risk_usd=500.0,
     contract_size=100_000.0,  #L backtest; live lot z MT5
     magic=100_100,
 
@@ -293,6 +301,8 @@ LIVE_BOT_CONFIG = BotConfig(
     wave_counter_two_sided_enabled=True,
     two_sided_entry_enabled=False,
     two_sided_entry_min_wave_pct=0.55,
+    live_study_two_sided_mirror_orders=False,
+    live_study_promoted_two_sided_as_wave=True,
     skip_primary_entry_on_parent_wave_enable=True,
     wf_enabled=True,
     pp_enabled=False,

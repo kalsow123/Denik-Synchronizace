@@ -106,10 +106,17 @@ class TestVariantBSendOrderGuardSimulation:
             live_cfg, _plain_wave(), is_two_sided_mirror=True,
         ) is True
 
-    def test_ext_primary_wave_blocked(self, live_cfg):
+    def test_ext_primary_wave_passes(self, live_cfg):
+        # Parita s backtest WAVE reportem: EXT-primarni vlna je WAVE -> posila se.
         assert guard_live_send_order(
             live_cfg, _plain_wave(move_pct=0.80, is_ext=True),
-        ) is True
+        ) is False
+
+    def test_bos_retro_passes(self, live_cfg):
+        # BOS-retro (bypass_trend_filter) je v backtestu WAVE -> live ji posila.
+        assert guard_live_send_order(
+            live_cfg, _plain_wave(), bypass_trend_filter=True,
+        ) is False
 
 
 class TestVariantBPendingSnapshotSimulation:

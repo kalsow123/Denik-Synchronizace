@@ -112,6 +112,7 @@ def run_single(combo: dict) -> tuple:
     bot_name = combo.get("bot_name", "UNKNOWN")
     try:
         cfg = grid_dict_to_bot_config(combo)
+        cfg.run_e2e_parity = False
         cap_mode, cap_limit = grid_backtest_position_cap_settings(combo)
         spr, slip, track_conc = sim_params_from_grid_combo(combo)
         df = load_data(

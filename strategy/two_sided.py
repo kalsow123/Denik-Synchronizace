@@ -79,6 +79,8 @@ def wave_counter_two_sided_routing_enabled(cfg: BotConfig) -> bool:
 def wave_counter_two_sided_orders_enabled(cfg: BotConfig) -> bool:
     """Skutecne counter / two-sided ordery."""
     if wave_isolation_study_enabled(cfg):
+        if bool(getattr(cfg, "live_study_two_sided_mirror_orders", False)):
+            return wave_counter_two_sided_enabled(cfg)
         return False
     return wave_counter_two_sided_enabled(cfg)
 
@@ -555,6 +557,40 @@ def should_open_two_sided_counter(
     if p_dir not in (1, -1) or c_dir not in (1, -1):
         return False
     return c_dir == -p_dir
+
+
+def study_ts2_limit_lot_entry_ref(
+    ep: float,
+    is_buy: bool,
+    *,
+    bar_open: float | None,
+    decision_ask: float,
+    decision_bid: float,
+) -> float:
+    """Odhad fill entry pro lot — parita engine _trigger_pending (same-bar fill)."""
+    if bar_open is None:
+        return ep
+    o = float(bar_open)
+    if is_buy:
+        if decision_bid <= ep:
+            return min(ep, o)
+        return ep
+    if decision_ask >= ep:
+        return max(ep, o)
+    return ep
+
+
+def live_study_ts2_use_wave_primary_sizing(cfg: BotConfig) -> bool:
+    """Live study B+: TS2_ mirror má použít W-primary EP/SL (parita engine WAVE slice)."""
+    return bool(
+        getattr(cfg, "live_study_two_sided_mirror_orders", False)
+        and getattr(cfg, "live_study_promoted_two_sided_as_wave", False)
+    )
+
+
+def prepare_ts2_mirror_entry_signal(wave: dict, cfg: BotConfig) -> dict:
+    """Vstupní signál pro TS2_ — lot parita s W-primary v orders.py / E2E fill."""
+    return prepare_two_sided_counter_signal(wave, cfg)
 
 
 def prepare_two_sided_counter_signal(wave: dict, cfg: BotConfig) -> dict:

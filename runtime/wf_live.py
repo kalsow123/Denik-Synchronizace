@@ -106,6 +106,8 @@ class WfLiveRuntime:
         waves: list[dict],
         wf_result: dict,
         bar_idx: int,
+        wave_birth_by_time: dict[str, int] | None = None,
+        waves_by_bar: dict[int, list[dict]] | None = None,
     ) -> WfWavePrepResult:
         row = df.iloc[bar_idx]
         wt_raw = row["time"]
@@ -128,15 +130,39 @@ class WfLiveRuntime:
             return WfWavePrepResult(eval_result=wf_result)
 
         continued, continued_birth = resume_classic_waves_after_wf(df, cfg, wf_wave)
-        merge_wf_continued_classic_waves(
+        # Predej SDILENOU birth mapu (od callera, napr. live_loop/run_e2e), aby se
+        # do ni propsaly births resumed klasickych vln. Driv se sem davala cerstva
+        # throwaway mapa → continued births se ztratily → birth_bar_gate blokoval.
+        remove_times = merge_wf_continued_classic_waves(
             df,
             cfg,
             waves,
             wf_wave,
             continued,
             continued_birth,
-            wave_birth_by_time=compute_wave_birth_bars_pine(df, cfg),
+            wave_birth_by_time=(
+                wave_birth_by_time
+                if wave_birth_by_time is not None
+                else compute_wave_birth_bars_pine(df, cfg)
+            ),
         )
+        # PARITA S ENGINE (_merge_wf_continued_classic_waves): aktualizuj waves_by_bar
+        # — odeber nahrazene upfront vlny a pridej resumed klasicke vlny. Bez toho by
+        # tracker dal dostaval ODSTRANENE base vlny (stale mapa) → jine nasledne WF
+        # aktivace → jine continuation vlny (live 412 vs engine 398).
+        if waves_by_bar is not None:
+            if remove_times:
+                for b in list(waves_by_bar.keys()):
+                    waves_by_bar[b] = [
+                        w for w in waves_by_bar[b]
+                        if str(w.get("wave_time", "") or "") not in remove_times
+                    ]
+                    if not waves_by_bar[b]:
+                        del waves_by_bar[b]
+            for w in continued:
+                wwt = str(w.get("wave_time", "") or "")
+                if wwt and wwt in continued_birth:
+                    waves_by_bar.setdefault(int(continued_birth[wwt]), []).append(w)
         self._tracker.on_new_wave(
             wf_wave,
             birth_bar=int(wf_wave.get("draw_right", bar_idx)),
@@ -168,7 +194,13 @@ class WfLiveRuntime:
         if df is None or len(df) < 2 or not waves:
             return WfWavePrepResult()
 
-        birth = wave_birth_by_time or compute_wave_birth_bars_pine(df, cfg)
+        # POZOR: zachovat IDENTITU mapy od callera (i prazdne), aby se do ni
+        # propsaly births resumed vln pri WF aktivaci (sdileny objekt).
+        birth = (
+            wave_birth_by_time
+            if wave_birth_by_time is not None
+            else compute_wave_birth_bars_pine(df, cfg)
+        )
         waves_by_bar = _waves_by_birth_bar(waves, birth)
 
         if self._needs_resync(df):
@@ -208,6 +240,8 @@ class WfLiveRuntime:
                 elif wf_result.get("status") == "activate":
                     act = self._build_activation(
                         df, cfg, waves, wf_result, i,
+                        wave_birth_by_time=birth,
+                        waves_by_bar=waves_by_bar,
                     )
                     self._activation_results.append(act)
                     if activation is None:

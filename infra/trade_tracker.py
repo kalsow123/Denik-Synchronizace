@@ -190,10 +190,10 @@ def _position_side(t: int) -> str:
 
 
 def _wave_id_from_comment(comment: str) -> Optional[str]:
-    """Vytahne wave_time z comment 'W202604291430'."""
-    if comment and comment.startswith("W") and len(comment) == 13:
-        return comment[1:]
-    return None
+    """Vytahne wave_time z MT5 comment (W, TS2_, CNTR_, EWP_, …)."""
+    from infra.pending_snapshot import wave_time_from_pending_comment
+
+    return wave_time_from_pending_comment(comment)
 
 
 # ─── MAIN UPDATE ─────────────────────────────────────────
@@ -204,6 +204,7 @@ def update_trade_tracker(
     *,
     adx14_runtime=None,
     live_wave_stats=None,
+    promoted_two_sided_wave_times: set[str] | None = None,
 ) -> None:
     """
     Vola se kazdy cyklus live_loopu. Detekuje zmeny a loguje strukturovane eventy.
@@ -348,6 +349,8 @@ def update_trade_tracker(
                 live_wave_stats.on_position_closed(
                     comment=comment,
                     pnl_usd=float(close_data["pnl_usd"]),
+                    cfg=cfg,
+                    promoted_two_sided_wave_times=promoted_two_sided_wave_times,
                 )
 
             if adx14_runtime is not None and getattr(adx14_runtime, "pnl_tracker", None):
