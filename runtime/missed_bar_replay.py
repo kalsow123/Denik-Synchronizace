@@ -202,8 +202,15 @@ def replay_missed_closed_bar(
     log_event_fn: Callable[..., None],
     two_sided_tracker: Any = None,
     get_open_comments: Callable[[], list[str]] | None = None,
+    apply_mt5_effects: bool = True,
 ) -> MissedBarReplayState:
-    """Jeden missed closed bar — BOS, TP/G, WF, wave entries."""
+    """Jeden missed closed bar — BOS, TP/G, WF, wave entries.
+
+    apply_mt5_effects=False: jen interni stav (trend, sent_signals, TP sync).
+    Pouziti pri cold-start catch-up (last_processed=None), kdy recovery uz
+    nastavila MT5 a historicky replay nesmi rusit/vytvaret realne ordery.
+    E2E a outage catch-up pouzivaji default True.
+    """
     from runtime import live_loop as _ll
 
     bar_high, bar_low, bar_close, bar_open = _bar_ohlc(df, bar_idx)
@@ -246,13 +253,14 @@ def replay_missed_closed_bar(
         if _wt_bos:
             _bos_protect_wave_time = str(_wt_bos)
 
-    if do_close_pos:
+    _promoted_ts2 = (
+        state.promoted_two_sided_wave_times
+        if bool(getattr(cfg, "live_study_promoted_two_sided_as_wave", False))
+        else None
+    )
+
+    if apply_mt5_effects and do_close_pos:
         br = bos_per_bar_close_reason(cfg)
-        _promoted_ts2 = (
-            state.promoted_two_sided_wave_times
-            if bool(getattr(cfg, "live_study_promoted_two_sided_as_wave", False))
-            else None
-        )
         _dir_kw = dict(
             reason=br,
             protected_wave_times=protected_waves,
@@ -272,7 +280,7 @@ def replay_missed_closed_bar(
         elif current_trend == "bull":
             close_positions_by_direction(cfg, direction=-1, **_dir_kw)
 
-    if do_close_pos and _trend_dir_changed and _close_bos_flip is not None:
+    if apply_mt5_effects and do_close_pos and _trend_dir_changed and _close_bos_flip is not None:
         br = bos_per_bar_close_reason(cfg)
         _flip_broken_dir = +1 if state.last_known_trend_dir == "bull" else -1
         close_flip_follower_positions_on_bos(
@@ -301,14 +309,24 @@ def replay_missed_closed_bar(
             cfg=cfg,
         )
 
-    if do_cancel_pend and _trend_dir_changed and _close_bos_flip is not None:
+    if (
+        apply_mt5_effects
+        and do_cancel_pend
+        and _trend_dir_changed
+        and _close_bos_flip is not None
+    ):
         broken_dir = +1 if state.last_known_trend_dir == "bull" else -1
         cancel_pendings_by_direction(
             cfg, direction=broken_dir, reason="BOS_CANCEL_PENDING", waves=waves,
         )
         cancel_flip_follower_pendings_on_bos(cfg)
 
-    if bos_entry_should_open_on_flip(cfg) and _trend_dir_changed and _close_bos_flip is not None:
+    if (
+        apply_mt5_effects
+        and bos_entry_should_open_on_flip(cfg)
+        and _trend_dir_changed
+        and _close_bos_flip is not None
+    ):
         place_live_bos_reentry(
             cfg=cfg,
             new_trend_dir=current_trend,
@@ -342,20 +360,22 @@ def replay_missed_closed_bar(
             g_extension_closed=g_extension_hit_closed_positions,
             place_fallback_counter=place_live_counter_position,
             log_event_fn=log_event_fn,
+            apply_mt5_effects=apply_mt5_effects,
         )
         state.forming_tp_watch = _tp_result.forming_tp_watch
 
-    _handle_wf_activations_for_bar(
-        cfg=cfg,
-        df=df,
-        bar_idx=bar_idx,
-        bar_close=bar_close,
-        wf_activations=wf_activations,
-        sent_signals=sent_signals,
-        fill_trend_state=fill_trend_state,
-    )
+    if apply_mt5_effects:
+        _handle_wf_activations_for_bar(
+            cfg=cfg,
+            df=df,
+            bar_idx=bar_idx,
+            bar_close=bar_close,
+            wf_activations=wf_activations,
+            sent_signals=sent_signals,
+            fill_trend_state=fill_trend_state,
+        )
 
-    if cfg.trend_filter_enabled and bos_flip_map:
+    if apply_mt5_effects and cfg.trend_filter_enabled and bos_flip_map:
         _retro_wt = bos_flip_map.get(int(bar_idx))
         if _retro_wt:
             _retro_wave = find_wave_by_time(waves, _retro_wt)
@@ -516,7 +536,7 @@ def replay_missed_closed_bar(
                 ):
                     two_sided_only = True
                     two_sided_tracker.register_counter_b_wave(str(wt))
-                    if wave_counter_two_sided_orders_enabled(cfg):
+                    if apply_mt5_effects and wave_counter_two_sided_orders_enabled(cfg):
                         counter = prepare_ts2_mirror_entry_signal(wave_order, cfg)
                         if send_order(
                             counter, cfg, entry_mode=cfg.entry_mode,
@@ -566,33 +586,34 @@ def replay_missed_closed_bar(
                 _trace(wt, bar_idx, "skip:trend_filter", reason=_reason)
                 continue
 
-        placed_meta: Dict[str, Any] = {}
-        if send_order(
-            wave_order,
-            cfg,
-            entry_mode=cfg.entry_mode,
-            placed_meta=placed_meta,
-            trend_state_at_fill=fill_trend_state,
-            bar_close=bar_close,
-        ):
-            _trace(wt, bar_idx, "SENT_PRIMARY")
-            _ll._maybe_place_live_counter_from_tp(
-                cfg=cfg,
-                wave=wave_order,
-                seq_info=seq_info,
-                tp_price=placed_meta.get("tp_price"),
-                all_waves=waves,
-                entries_allowed=entries_allowed,
-            )
-            sent_signals.add(sig_key)
-            failed_signals.pop(sig_key, None)
-            log_event_fn(
+        if apply_mt5_effects:
+            placed_meta: Dict[str, Any] = {}
+            if send_order(
+                wave_order,
                 cfg,
-                "info",
-                "MISSED_BAR_WAVE_ENTRY",
-                wave_id=str(wt),
-                bar_idx=int(bar_idx),
-            )
+                entry_mode=cfg.entry_mode,
+                placed_meta=placed_meta,
+                trend_state_at_fill=fill_trend_state,
+                bar_close=bar_close,
+            ):
+                _trace(wt, bar_idx, "SENT_PRIMARY")
+                _ll._maybe_place_live_counter_from_tp(
+                    cfg=cfg,
+                    wave=wave_order,
+                    seq_info=seq_info,
+                    tp_price=placed_meta.get("tp_price"),
+                    all_waves=waves,
+                    entries_allowed=entries_allowed,
+                )
+                sent_signals.add(sig_key)
+                failed_signals.pop(sig_key, None)
+                log_event_fn(
+                    cfg,
+                    "info",
+                    "MISSED_BAR_WAVE_ENTRY",
+                    wave_id=str(wt),
+                    bar_idx=int(bar_idx),
+                )
 
     if current_trend in ("bull", "bear"):
         state.last_known_trend_dir = current_trend

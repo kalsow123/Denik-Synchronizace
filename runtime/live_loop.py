@@ -1312,6 +1312,20 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                     last_bar_idx=int(new_bar_indices[-1]),
                 )
 
+            _cold_start_catch_up = last_processed_closed_bar_time is None
+            if _cold_start_catch_up and len(new_bar_indices) > 1:
+                log_event(
+                    cfg,
+                    "info",
+                    "COLD_START_REPLAY_STATE_ONLY",
+                    missed_bars=int(len(new_bar_indices) - 1),
+                    message=(
+                        "Cold start: replay aktualizuje jen interni stav "
+                        "(trend, sent_signals, TP sync). MT5 ordery beze zmeny "
+                        "(recovery + hlavni smycka)."
+                    ),
+                )
+
             last_processed_closed_bar_time = closed_bar_ts
 
             waves = detect_waves(df, cfg)
@@ -1514,6 +1528,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                         log_event_fn=log_event,
                         two_sided_tracker=_live_two_sided_tracker,
                         get_open_comments=lambda: [snap.get("comment", "") for snap in tracker_state.known_positions.values()],
+                        apply_mt5_effects=not _cold_start_catch_up,
                     )
                 last_known_trend_dir = _replay_state.last_known_trend_dir
                 prev_cycle_last_bar_time = _replay_state.prev_cycle_last_bar_time

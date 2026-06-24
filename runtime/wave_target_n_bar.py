@@ -62,6 +62,7 @@ def run_wave_target_n_bar_cycle(
     g_extension_closed: Callable[[dict], bool],
     place_fallback_counter: Callable[..., None],
     log_event_fn: Callable[..., None],
+    apply_mt5_effects: bool = True,
 ) -> WaveTargetNBarResult:
     """
     Sync + G catch-up + forming watch + extension hit + TP_WAVE_N event.
@@ -100,7 +101,7 @@ def run_wave_target_n_bar_cycle(
 
     if wave_target_n_early_g_enabled(cfg):
         watch = result.forming_tp_watch
-        if tp_sync.catch_up_extension and watch is not None:
+        if tp_sync.catch_up_extension and watch is not None and apply_mt5_effects:
             ext_stats = close_positions_on_extension_tp_hit(
                 cfg,
                 trend_dir=int(tp_sync.catch_up_trend_dir),
@@ -175,7 +176,7 @@ def run_wave_target_n_bar_cycle(
                 low=bar_low,
                 close=bar_close,
                 open_=bar_open,
-            ):
+            ) and apply_mt5_effects:
                 ext_stats = close_positions_on_extension_tp_hit(
                     cfg,
                     trend_dir=int(watch.trend_dir),
@@ -258,35 +259,46 @@ def run_wave_target_n_bar_cycle(
         trend_dir = int(w["dir"])
         tp_price = float(tp_raw) if tp_raw is not None else 0.0
 
-        close_stats = close_positions_on_tp_wave_n(
-            cfg,
-            trend_dir=trend_dir,
-            bar_high=bar_high,
-            bar_low=bar_low,
-            bar_close=bar_close,
-            reason="TP_WAVE_N",
-            ext1_protection_per_bar=ext1_per_bar,
-            current_bar_idx=int(bar_idx),
-            current_wave_time=wt,
-            wave_birth_by_time=birth_by_time,
-            main_trend_dir=main_trend_dir,
+        close_stats = (
+            close_positions_on_tp_wave_n(
+                cfg,
+                trend_dir=trend_dir,
+                bar_high=bar_high,
+                bar_low=bar_low,
+                bar_close=bar_close,
+                reason="TP_WAVE_N",
+                ext1_protection_per_bar=ext1_per_bar,
+                current_bar_idx=int(bar_idx),
+                current_wave_time=wt,
+                wave_birth_by_time=birth_by_time,
+                main_trend_dir=main_trend_dir,
+            )
+            if apply_mt5_effects
+            else {
+                "trend_dir_closed": 0,
+                "wave_counter_closed": 0,
+                "two_sided_closed": 0,
+                "sl_protected": 0,
+            }
         )
         processed_tp_wave_times.add(wt)
-        log_event_fn(
-            cfg,
-            "info",
-            "TP_WAVE_EVENT",
-            wave_time=wt,
-            wave_dir=int(trend_dir),
-            tp_price=float(tp_price),
-            trend_dir_closed=int(close_stats["trend_dir_closed"]),
-            wave_counters_closed=int(close_stats["wave_counter_closed"]),
-            two_sided_closed=int(close_stats.get("two_sided_closed", 0)),
-            sl_protected=int(close_stats["sl_protected"]),
-            bar_close=float(bar_close),
-        )
+        if apply_mt5_effects:
+            log_event_fn(
+                cfg,
+                "info",
+                "TP_WAVE_EVENT",
+                wave_time=wt,
+                wave_dir=int(trend_dir),
+                tp_price=float(tp_price),
+                trend_dir_closed=int(close_stats["trend_dir_closed"]),
+                wave_counters_closed=int(close_stats["wave_counter_closed"]),
+                two_sided_closed=int(close_stats.get("two_sided_closed", 0)),
+                sl_protected=int(close_stats["sl_protected"]),
+                bar_close=float(bar_close),
+            )
         if (
-            wave_target_n_early_g_enabled(cfg)
+            apply_mt5_effects
+            and wave_target_n_early_g_enabled(cfg)
             and result.g_fallback_birth
             and not result.g_counter_placed
         ):
