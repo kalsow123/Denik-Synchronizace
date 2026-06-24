@@ -251,7 +251,7 @@ def trade_risk_usd(cfg: BotConfig, *, is_pp: bool = False) -> float:
 # Tento config ctete `main.py` pri startu live bota.
 # Prepnuti: zmente tp_mode nize, nebo python -m main --config <NAZEV>
 
-# LIVE_BOT_CONFIG — grid EXAMPLE combo_no 2 (2025-11-10 .. 2026-05-09, w2notpFalse).
+# LIVE_BOT_CONFIG — grid combo_no 50 (EURUSD xlsx 2024-06-10 .. 2025-07-10, w2notpFalse).
 # Runtime engine: resolve_grid_engine_config() — plna simulace (counter/EXT ordery).
 # wave_isolation_study=True (varianta B): engine plny routing, MT5 WAVE + TS2_ mirror
 # (live_study_two_sided_mirror_orders); wave_pnl = equity slice.
@@ -260,7 +260,7 @@ LIVE_BOT_CONFIG = BotConfig(
     # ============== MARKET SETTING ==============
     symbol="EURUSD",  #L FTMO/broker symbol (".x"/".r" jsou jen jine nazvy stejneho symbolu)
     timeframe=mt5.TIMEFRAME_M30,
-    wave_min_pct=0.26,
+    wave_min_pct=0.2,
     causal_mode=False,  #L True = backtest bez look-ahead (parita live); False = legacy grid
     run_e2e_parity=False,  #L True = po BT spustit E2E parity (live_match / --e2e)
     wave_session_filter_enabled=False,
@@ -268,9 +268,9 @@ LIVE_BOT_CONFIG = BotConfig(
     # ============== TP SETTINGS ==============
     rrr=2.5,
     tp_mode=TPMode.WAVE_TARGET_N,
-    tp_target_wave_index=4,
+    tp_target_wave_index=2,
     wave_extension_pct=0.10,
-    bos_entry_in_rrr_fixed=True,
+    bos_entry_in_rrr_fixed=False,
     wave_2_no_tp_enable=False,
     wave_2_no_tp_max_index=2,
 
@@ -292,7 +292,7 @@ LIVE_BOT_CONFIG = BotConfig(
     risk_usd=500.0,
     pp_risk_usd=500.0,
     contract_size=100_000.0,  #L backtest; live lot z MT5
-    magic=100_100,
+    magic=100_200,
 
     # ============== WAVE & PP ==============
     wave_min_sl=0.12,
@@ -300,7 +300,7 @@ LIVE_BOT_CONFIG = BotConfig(
     wave_positions_only=True,
     wave_isolation_study=True,
     wave_counter_two_sided_enabled=True,
-    two_sided_entry_enabled=False,
+    two_sided_entry_enabled=True,
     two_sided_entry_min_wave_pct=0.55,
     live_study_two_sided_mirror_orders=True,  #L study B: posilat TS2_ mirror na MT5 (guard + wave_counter_two_sided_orders)
     live_study_promoted_two_sided_as_wave=True,
@@ -313,30 +313,30 @@ LIVE_BOT_CONFIG = BotConfig(
     # ============== TREND FILTER & BOS ==============
     trend_filter_enabled=True,
     trend_hh_hl_filter_enabled=True,
-    counter_position_enabled=False,
+    counter_position_enabled=True,
     bos_entry_enable=False,
     wave_size_sl_ladder_base_pct=0.21,
     wave_size_sl_ladder_step_pct=0.16,
     wave_size_sl_ladder_band_size_pct=0.50,
 
-    # ============== EXT (combo 2 — detekce/kontext; MT5 ordery jen WAVE) ==============
+    # ============== EXT (combo 50 — detekce/kontext; MT5 ordery jen WAVE) ==============
     ext_enabled=True,
     ext_secondary_enabled=False,
     ext_wave_min_pct=0.76,
     ext_weekend_gap_relax_factor=0.76,
-    ext_counter_enabled=True,
+    ext_counter_enabled=False,
     ext_counter_time="23:00",
     ext_counter_min_sl_enabled=True,
     ext_counter_min_sl_pct=0.16,
     ext_trade_both_sides_in_range=True,
     ext_range_protect_pendings_from_bos_cancel=True,  #L
-    wave_min_pct_enable=True,
-    ext_post_both_sides_wave_min_pct=0.35,
+    wave_min_pct_enable=False,
+    ext_post_both_sides_wave_min_pct=0.13,
     ext_post_both_sides_default_sl_pct=0.10,
     ext_close_trend_positions_on_bos=True,
 
     # ============== OTHERS ==============
-    bot_name="EURUSD_FXIFY_1_n=4",  #L telemetry BOT_ID == bot_name
+    bot_name="EURUSD_FTMO_n=2",  #L telemetry BOT_ID == bot_name
     heartbeat_interval_sec=180,  #L HEARTBEAT do jsonl kazde 3 min
     jsonl_retention_days=2,  #L jsonl: smazat radky starsi nez 2 dny (i sync do gitu)
     startup_bars=1440,  #L ~1 mesic zpetne z MT5 (M30: 30*48)
