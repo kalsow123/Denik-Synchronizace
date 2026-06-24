@@ -253,7 +253,8 @@ def trade_risk_usd(cfg: BotConfig, *, is_pp: bool = False) -> float:
 
 # LIVE_BOT_CONFIG — grid EXAMPLE combo_no 2 (2025-11-10 .. 2026-05-09, w2notpFalse).
 # Runtime engine: resolve_grid_engine_config() — plna simulace (counter/EXT ordery).
-# wave_isolation_study=True (varianta B): engine plny routing, MT5 jen WAVE; wave_pnl = equity.
+# wave_isolation_study=True (varianta B): engine plny routing, MT5 WAVE + TS2_ mirror
+# (live_study_two_sided_mirror_orders); wave_pnl = equity slice.
 
 LIVE_BOT_CONFIG = BotConfig(
     # ============== MARKET SETTING ==============
@@ -301,7 +302,7 @@ LIVE_BOT_CONFIG = BotConfig(
     wave_counter_two_sided_enabled=True,
     two_sided_entry_enabled=False,
     two_sided_entry_min_wave_pct=0.55,
-    live_study_two_sided_mirror_orders=False,
+    live_study_two_sided_mirror_orders=True,  #L study B: posilat TS2_ mirror na MT5 (guard + wave_counter_two_sided_orders)
     live_study_promoted_two_sided_as_wave=True,
     skip_primary_entry_on_parent_wave_enable=True,
     wf_enabled=True,

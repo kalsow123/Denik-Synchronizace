@@ -214,6 +214,13 @@ def _bot_config_to_grid_dict(cfg: BotConfig) -> dict:
     }
 
 
+# Pole grid combo neobsahuje — pri merge engine cfg se berou ze zdrojoveho BotConfig.
+_LIVE_ONLY_SKIP_GRID_MERGE = frozenset({
+    "live_study_two_sided_mirror_orders",
+    "live_study_promoted_two_sided_as_wave",
+})
+
+
 def resolve_grid_engine_config(
     cfg: BotConfig,
     *,
@@ -234,7 +241,8 @@ def resolve_grid_engine_config(
     updates = {
         f.name: getattr(engine, f.name)
         for f in fields(BotConfig)
-        if getattr(engine, f.name) != getattr(cfg, f.name)
+        if f.name not in _LIVE_ONLY_SKIP_GRID_MERGE
+        and getattr(engine, f.name) != getattr(cfg, f.name)
     }
     return replace(cfg, **updates) if updates else cfg
 

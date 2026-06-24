@@ -1,4 +1,8 @@
 PROFILES["top500"] = {
+    "grid_defaults": {
+        "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
+        "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
+    },
     "grid": [
         # H1 o=2 r=1.50 f=0.450 lmt
         {

@@ -71,17 +71,26 @@ def classify_live_execution_mode(cfg: BotConfig) -> LiveExecutionMode:
 def resolve_live_execution_config(cfg: BotConfig) -> BotConfig:
     """
     Engine parita (resolve_grid_engine_config) + MT5 varianta B pri study:
-    routing counter/EXT bezi, na ucet jde jen WAVE.
+    routing counter/EXT bezi, na ucet jde WAVE (+ volitelne TS2_ mirror dle configu).
     """
     requested_slice = live_wave_isolation_requested(cfg)
+    names = {f.name for f in fields(BotConfig)}
+    live_study_overrides = {
+        k: getattr(cfg, k)
+        for k in (
+            "live_study_two_sided_mirror_orders",
+            "live_study_promoted_two_sided_as_wave",
+        )
+        if k in names
+    }
     cfg = resolve_grid_engine_config(cfg)
     if requested_slice:
-        names = {f.name for f in fields(BotConfig)}
         cfg = replace(
             cfg,
             **{k: v for k, v in {"wave_isolation_study": True}.items() if k in names},
         )
-    return apply_live_mt5_wave_slice_execution(cfg, requested=requested_slice)
+    cfg = apply_live_mt5_wave_slice_execution(cfg, requested=requested_slice)
+    return replace(cfg, **live_study_overrides)
 
 
 def log_live_execution_mode(cfg: BotConfig) -> None:
@@ -89,7 +98,9 @@ def log_live_execution_mode(cfg: BotConfig) -> None:
     messages = {
         "wave_study_wave_only": (
             "MT5 varianta B: engine plny routing (counter/EXT logika), "
-            "na ucet jen klasické WAVE. wave_pnl = equity WAVE slice."
+            "na ucet WAVE"
+            + (" + TS2_ mirror." if bool(getattr(cfg, "live_study_two_sided_mirror_orders", False)) else ".")
+            + " wave_pnl = equity WAVE slice."
         ),
         "wave_slice": (
             "MT5: legacy slice — WAVE + counter + EXT counter. "

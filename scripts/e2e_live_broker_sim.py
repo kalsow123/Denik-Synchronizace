@@ -404,6 +404,40 @@ def _wt_to_ts(wt: str):
         return pd.Timestamp(DATE_FROM)
 
 
+def filter_e2e_wave_closed(
+    closed: list,
+    cfg,
+    *,
+    promoted_waves: set[str] | None = None,
+) -> list:
+    """WAVE slice E2E vysledku — parita s live deploy config (guard + promoted TS2)."""
+    from backtest.stats import classify_position_kind
+
+    promoted = promoted_waves or set()
+    out = []
+    for t in closed:
+        wt = _clean_wave_time(getattr(t, "comment", getattr(t, "wave_time", "")))
+        is_promoted_ts2 = wt in promoted
+        kind = classify_position_kind(
+            is_pp=bool(getattr(t, "is_pp", 0)),
+            is_counter=bool(getattr(t, "is_counter", 0)),
+            is_bos_reentry=bool(getattr(t, "is_bos_reentry", 0)),
+            is_two_sided_mirror=(
+                bool(getattr(t, "is_two_sided_mirror", 0)) and not is_promoted_ts2
+            ),
+            is_ext=bool(getattr(t, "is_ext", 0)),
+            entry_tag=str(getattr(t, "entry_tag", "base")),
+        )
+        if kind == "WAVE":
+            out.append(t)
+        elif (
+            kind == "WAVE_TWO_SIDED"
+            and bool(getattr(cfg, "live_study_two_sided_mirror_orders", False))
+        ):
+            out.append(t)
+    return out
+
+
 def main() -> None:
     from config.bot_config import LIVE_BOT_CONFIG
     from config.position_modes import resolve_grid_engine_config
@@ -419,8 +453,6 @@ def main() -> None:
 
     df = filter_by_date_range(load_csv(str(CSV)), DATE_FROM, DATE_TO).reset_index(drop=True)
     live_cfg = resolve_live_execution_config(LIVE_BOT_CONFIG)
-    live_cfg.live_study_two_sided_mirror_orders = True
-    live_cfg.live_study_promoted_two_sided_as_wave = True
 
     print("=" * 72)
     print("E2E LIVE (fake broker) vs BACKTEST |", DATE_FROM, "..", DATE_TO)
@@ -436,31 +468,6 @@ def main() -> None:
             is_ext=bool(getattr(t, "is_ext", 0)),
             entry_tag=str(getattr(t, "entry_tag", "base"))) == "WAVE"]
 
-    def live_wave_pnl(closed, *, promoted_waves: set[str] | None = None):
-        promoted = promoted_waves or set()
-        out = []
-        for t in closed:
-            wt = _clean_wave_time(getattr(t, "comment", ""))
-            is_promoted_ts2 = wt in promoted
-            kind = classify_position_kind(
-                is_pp=bool(getattr(t, "is_pp", 0)),
-                is_counter=bool(getattr(t, "is_counter", 0)),
-                is_bos_reentry=bool(getattr(t, "is_bos_reentry", 0)),
-                is_two_sided_mirror=(
-                    bool(getattr(t, "is_two_sided_mirror", 0)) and not is_promoted_ts2
-                ),
-                is_ext=bool(getattr(t, "is_ext", 0)),
-                entry_tag=str(getattr(t, "entry_tag", "base")),
-            )
-            if kind == "WAVE":
-                out.append(t)
-            elif (
-                kind == "WAVE_TWO_SIDED"
-                and bool(getattr(live_cfg, "live_study_two_sided_mirror_orders", False))
-            ):
-                out.append(t)
-        return out
-
     bt_wave = bt_wave_pnl(BacktestEngine(engine_cfg).run(df, retain_wave_snapshot=False))
     bt = pnl_ddi_from_closed(
         [_ns(wave_time=t.wave_time, dir=t.dir, lot=t.lot, entry_price=t.entry_price,
@@ -472,7 +479,9 @@ def main() -> None:
     from runtime.live_wave_stats import position_kind_from_mt5_comment
     
     live_closed_all = run_e2e(df, live_cfg, fake)
-    live_closed = live_wave_pnl(live_closed_all, promoted_waves=fake.promoted_waves)
+    live_closed = filter_e2e_wave_closed(
+        live_closed_all, live_cfg, promoted_waves=fake.promoted_waves,
+    )
     ts2_count = sum(
         1 for t in live_closed_all
         if str(getattr(t, "comment", "")).startswith("TS2_")

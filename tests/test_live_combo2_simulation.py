@@ -101,10 +101,11 @@ class TestVariantBSendOrderGuardSimulation:
     def test_plain_wave_passes(self, live_cfg):
         assert guard_live_send_order(live_cfg, _plain_wave()) is False
 
-    def test_two_sided_mirror_blocked(self, live_cfg):
+    def test_two_sided_mirror_passes_when_enabled(self, live_cfg):
+        assert live_cfg.live_study_two_sided_mirror_orders is True
         assert guard_live_send_order(
             live_cfg, _plain_wave(), is_two_sided_mirror=True,
-        ) is True
+        ) is False
 
     def test_ext_primary_wave_passes(self, live_cfg):
         # Parita s backtest WAVE reportem: EXT-primarni vlna je WAVE -> posila se.
@@ -120,15 +121,18 @@ class TestVariantBSendOrderGuardSimulation:
 
 
 class TestVariantBPendingSnapshotSimulation:
-    def test_restore_keeps_wave_only(self):
+    def test_restore_keeps_wave_and_ts2_mirror(self):
         cfg = resolve_live_execution_config(LIVE_BOT_CONFIG)
         snaps = [
             PendingOrderSnapshot(2, 1.1, 1.09, 1.12, 0.1, c, None)
             for c, _, _ in MT5_COMMENTS
         ]
         restored = filter_wave_only_pending_snapshots(cfg, snaps)
-        assert len(restored) == 1
-        assert restored[0].comment == "W202601011030"
+        assert len(restored) == 2
+        assert {s.comment for s in restored} == {
+            "W202601011030",
+            "TS2_202601011030",
+        }
 
 
 class TestVariantBMt5CommentSimulation:

@@ -30,10 +30,10 @@ def test_apply_keeps_engine_counter_routing():
     assert cfg.bos_entry_enable is False
 
 
-def test_guard_blocks_only_mirror_and_post_ext():
-    """Parita s backtest WAVE reportem: EXT-primarni i BOS-retro jsou WAVE -> POVOLENO.
-    Potlaci se jen two_sided mirror (WAVE_TWO_SIDED) a post_ext_trend_suppressed."""
+def test_guard_blocks_only_post_ext_when_mirror_on():
+    """EXT/BOS-retro/WAVE/TS2 mirror povoleno; potlaci se post_ext_trend_suppressed."""
     cfg = resolve_live_execution_config(LIVE_BOT_CONFIG)
+    assert cfg.live_study_two_sided_mirror_orders is True
     ext = {
         "wave_time": "202601011000",
         "dir": 1,
@@ -42,9 +42,7 @@ def test_guard_blocks_only_mirror_and_post_ext():
         "move_pct": 0.8,
         "is_ext": True,
     }
-    # EXT-primarni vlna = WAVE v backtestu -> live ji posila (neblokuje)
     assert guard_live_send_order(cfg, ext) is False
-    # BOS-retro (bypass_trend_filter) = WAVE v backtestu -> live ji posila
     assert guard_live_send_order(cfg, ext, bypass_trend_filter=True) is False
     plain = {
         "wave_time": "202601011000",
@@ -55,9 +53,7 @@ def test_guard_blocks_only_mirror_and_post_ext():
     }
     assert guard_live_send_order(cfg, plain) is False
     assert guard_live_send_order(cfg, plain, bypass_trend_filter=True) is False
-    # two_sided mirror = WAVE_TWO_SIDED -> stale blokovano
-    assert guard_live_send_order(cfg, plain, is_two_sided_mirror=True) is True
-    # post_ext_trend_suppressed = vlna neexistuje -> blokovano
+    assert guard_live_send_order(cfg, plain, is_two_sided_mirror=True) is False
     suppressed = dict(plain, post_ext_trend_suppressed=True)
     assert guard_live_send_order(cfg, suppressed) is True
 
@@ -71,25 +67,28 @@ def test_skip_blocks_counter_ext_two_sided():
     assert skip_live_non_wave_entry(cfg, "PP") is True
 
 
-def test_allowed_mt5_comments_wave_only():
-    assert is_isolation_study_allowed_mt5_comment("W202601011000")
-    assert not is_isolation_study_allowed_mt5_comment("CNTR_202601011000@G4")
-    assert not is_isolation_study_allowed_mt5_comment("ECT_202601011000")
-    assert not is_isolation_study_allowed_mt5_comment("PP_202601011000")
+def test_allowed_mt5_comments_wave_and_ts2_mirror():
+    cfg = resolve_live_execution_config(LIVE_BOT_CONFIG)
+    assert is_isolation_study_allowed_mt5_comment("W202601011000", cfg)
+    assert is_isolation_study_allowed_mt5_comment("TS2_202601011000", cfg)
+    assert not is_isolation_study_allowed_mt5_comment("CNTR_202601011000@G4", cfg)
+    assert not is_isolation_study_allowed_mt5_comment("ECT_202601011000", cfg)
+    assert not is_isolation_study_allowed_mt5_comment("PP_202601011000", cfg)
 
 
-def test_snapshot_filter_wave_only():
+def test_snapshot_filter_keeps_wave_and_ts2_mirror():
     from infra.pending_snapshot import PendingOrderSnapshot
 
     cfg = resolve_live_execution_config(LIVE_BOT_CONFIG)
     snaps = [
         PendingOrderSnapshot(2, 1.1, 1.09, 1.12, 0.1, "W202601011000", None),
+        PendingOrderSnapshot(2, 1.1, 1.09, 1.12, 0.1, "TS2_202601011000", None),
         PendingOrderSnapshot(2, 1.1, 1.09, 1.12, 0.1, "CNTR_202601011000@G4", None),
         PendingOrderSnapshot(2, 1.1, 1.09, 1.12, 0.1, "PP_202601011000", None),
     ]
     out = filter_wave_only_pending_snapshots(cfg, snaps)
-    assert len(out) == 1
-    assert out[0].comment == "W202601011000"
+    assert len(out) == 2
+    assert {s.comment for s in out} == {"W202601011000", "TS2_202601011000"}
 
 
 def test_wave_id_from_comment_parses_ts2_prefix():

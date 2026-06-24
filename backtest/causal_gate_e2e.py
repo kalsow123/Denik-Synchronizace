@@ -2,6 +2,7 @@
 Causal gate + live E2E parity — orchestrátor BT vs live replay cesty.
 
 Spuštění: run_e2e_parity=True v BotConfig nebo --e2e v run_backtest.
+E2E config = resolve_live_execution_config() bez override (parita s main.py / deploy).
 """
 from __future__ import annotations
 
@@ -9,8 +10,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
-
-from dataclasses import replace
 
 from backtest.causal_policy import causal_debug_summary, policy_from_cfg
 from backtest.engine import BacktestEngine
@@ -36,23 +35,39 @@ def _wave_only_trades(trades: list) -> list:
 
 
 def _e2e_live_config(cfg: BotConfig) -> BotConfig:
-    from runtime.live_wave_isolation import resolve_live_execution_config
+    from dataclasses import fields, replace
 
-    live_cfg = resolve_live_execution_config(cfg)
-    return replace(
-        live_cfg,
-        live_study_two_sided_mirror_orders=True,
-        live_study_promoted_two_sided_as_wave=True,
+    from runtime.live_wave_isolation import (
+        live_wave_isolation_requested,
+        resolve_live_execution_config,
     )
+
+    # Backtester predava engine cfg (wave_isolation_study=False — grid parita).
+    # Live deploy (main.py) cte registry se study=True; bez obnovy by E2E bezel
+    # v rezimu wave_only misto wave_study_wave_only.
+    seed = cfg
+    if bool(getattr(cfg, "wave_positions_only", False)) and not live_wave_isolation_requested(cfg):
+        names = {f.name for f in fields(BotConfig)}
+        seed = replace(
+            cfg,
+            **{k: v for k, v in {"wave_isolation_study": True}.items() if k in names},
+        )
+    return resolve_live_execution_config(seed)
 
 
 def _run_live_e2e(df: pd.DataFrame, cfg: BotConfig) -> list:
-    from scripts.e2e_live_broker_sim import install_fake, run_e2e
+    from scripts.e2e_live_broker_sim import (
+        filter_e2e_wave_closed,
+        install_fake,
+        run_e2e,
+    )
 
     live_cfg = _e2e_live_config(cfg)
     fake = install_fake(live_cfg.symbol, float(live_cfg.contract_size))
     closed = run_e2e(df, live_cfg, fake)
-    return _wave_only_trades(closed)
+    return filter_e2e_wave_closed(
+        closed, live_cfg, promoted_waves=fake.promoted_waves,
+    )
 
 
 @dataclass
