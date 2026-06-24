@@ -358,7 +358,14 @@ def install_fake(symbol: str, contract_size: float) -> FakeMt5:
 # ---------------------------------------------------------------------------
 # DDi/PnL stejnou cestou jako backtest report
 # ---------------------------------------------------------------------------
-def pnl_ddi_from_closed(closed: list, *, bot_name: str) -> dict:
+def pnl_ddi_from_closed(
+    closed: list,
+    *,
+    bot_name: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    combo: dict | None = None,
+) -> dict:
     import pandas as pd
     from backtest.grid.study_mode import (
         apply_wave_isolation_report_stats,
@@ -367,13 +374,21 @@ def pnl_ddi_from_closed(closed: list, *, bot_name: str) -> dict:
     from backtest.metrics.robustness import compute_robustness_metrics
     from backtest.stats import compute_stats
 
+    d_from = date_from or DATE_FROM
+    d_to = date_to or DATE_TO
+    combo_cfg = dict(combo or {})
+    combo_cfg.setdefault("wave_isolation_study", True)
+    combo_cfg.setdefault("wave_positions_only", True)
+    combo_cfg["date_from"] = d_from
+    combo_cfg["date_to"] = d_to
+
     rows = []
     for t in closed:
         rows.append({
             "wave_time": str(t.wave_time), "dir": int(t.dir), "lot": float(t.lot),
             "entry_price": float(t.entry_price), "close_price": float(t.close_price),
             "close_reason": str(t.reason), "pnl_usd": float(t.pnl_usd),
-            "close_time": _wt_to_ts(t.wave_time), "position_kind": "WAVE",
+            "close_time": _wt_to_ts(t.wave_time, fallback=d_from), "position_kind": "WAVE",
             "is_ext": bool(getattr(t, "is_ext", False)),
             "is_counter": bool(getattr(t, "is_counter", False)),
             "is_pp": bool(getattr(t, "is_pp", False)),
@@ -382,26 +397,25 @@ def pnl_ddi_from_closed(closed: list, *, bot_name: str) -> dict:
             "entry_tag": str(getattr(t, "entry_tag", "base")),
         })
     df = pd.DataFrame(rows)
-    combo = {"wave_isolation_study": True, "wave_positions_only": True,
-             "date_from": DATE_FROM, "date_to": DATE_TO}
-    wdf = filter_trades_df_for_grid_stats(df, combo) if not df.empty else df
-    stats = compute_stats(wdf, date_from=DATE_FROM, date_to=DATE_TO)
-    stats = apply_wave_isolation_report_stats(stats, combo)
+    wdf = filter_trades_df_for_grid_stats(df, combo_cfg) if not df.empty else df
+    stats = compute_stats(wdf, date_from=d_from, date_to=d_to)
+    stats = apply_wave_isolation_report_stats(stats, combo_cfg)
     stats.update(compute_robustness_metrics(
         wdf, max_dd_pct_vs_peak=stats.get("max_drawdown_pct_vs_peak"),
         max_dd_pct_vs_initial=stats.get("max_drawdown_pct"), bot_name=bot_name,
     ))
+    stats["config"] = combo_cfg
     return stats
 
 
-def _wt_to_ts(wt: str):
+def _wt_to_ts(wt: str, *, fallback: str = DATE_FROM):
     import pandas as pd
     try:
         return pd.Timestamp(
             f"{wt[0:4]}-{wt[4:6]}-{wt[6:8]} {wt[8:10]}:{wt[10:12]}"
         )
     except Exception:
-        return pd.Timestamp(DATE_FROM)
+        return pd.Timestamp(fallback)
 
 
 def filter_e2e_wave_closed(

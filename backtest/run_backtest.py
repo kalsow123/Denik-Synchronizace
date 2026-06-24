@@ -23,6 +23,7 @@ VOLBY
 
   --csv PATH            CSV soubor pro live_match a compare. Default: data/{symbol}_{tf}.csv
   --date-from DATE      Filtr od data (YYYY-MM-DD); u --profile grid prepise datum u kazde kombinace
+  --no-trades-export    Neukládat *_trades.xlsx/csv s historií všech obchodů
   --date-to DATE        Filtr do data (YYYY-MM-DD); u gridu stejne
   --workers N           Pocet paralelnich procesu pro grid (default: cpu_count - 1)
   --sequential          Spustit grid sekvencne (snazsi debugging)
@@ -737,7 +738,8 @@ def _run_single_config(
 
     if not trades_df.empty:
         print_last_trades(trades_df, n=10)
-        save_trades_csv(trades_df, output_dir, cfg.bot_name, test_pozice=test_pozice)
+        if args is None or not getattr(args, "no_trades_export", False):
+            save_trades_csv(trades_df, output_dir, cfg.bot_name, test_pozice=test_pozice)
 
         # Plot equity curve, pokud byl --plot flag
         if args is not None and getattr(args, "plot", False):
@@ -830,10 +832,18 @@ def _run_single_config(
         )
 
         e2e_result = run_e2e_parity_after_backtest(
-            df, cfg, backtest_trades=trades, backtest_stats=stats,
+            df, cfg, backtest_trades=trades, backtest_stats=stats, combo=_combo,
         )
         print_causal_gate_e2e_report(e2e_result)
         stats["e2e_parity"] = e2e_result.parity
+        from backtest.grid.grid_report_io import append_e2e_sheet_to_grid_report
+
+        append_e2e_sheet_to_grid_report(
+            output_dir,
+            e2e_result.live_e2e_stats,
+            _combo,
+            parity=e2e_result.parity,
+        )
 
     return stats
 
@@ -1351,6 +1361,11 @@ def main():
         "--e2e",
         action="store_true",
         help="Po backtestu spusti E2E parity (live replay + fake MT5)",
+    )
+    parser.add_argument(
+        "--no-trades-export",
+        action="store_true",
+        help="Neukládat *_trades.xlsx/csv s historií všech obchodů (live_match / compare)",
     )
     parser.add_argument("--workers", type=int, default=None,
                         help="Pocet workeru pro grid (default: cpu_count - 1)")

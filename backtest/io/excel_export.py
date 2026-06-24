@@ -23,6 +23,7 @@ GRID_SHEET_PROP_FIRM = "prop_firm"
 GRID_SHEET_RANKING = "ranking"  # legacy název; nově Ranking_<PRESET>
 GRID_SHEET_CHYBY = "chyby"
 GRID_SHEET_DDI_EPIZODY = "ddi_epizody"
+GRID_SHEET_E2E = "E2E"
 RANKING_SHEET_PREFIX = "Ranking_"
 _DDI_EPIZODE_VALUE_PREFIX = "DDi"
 _LARGE_SHEET_FAST_THRESHOLD = 2000
@@ -482,7 +483,10 @@ def export_grid_workbook(
         prepared.to_excel(writer, sheet_name=safe_name, index=False)
         ws = writer.sheets[safe_name]
         large_sheet = len(prepared) > _LARGE_SHEET_FAST_THRESHOLD
-        full_format = is_ranking_sheet(safe_name) or safe_name == GRID_SHEET_SUMMARIES
+        full_format = (
+            is_ranking_sheet(safe_name)
+            or safe_name in (GRID_SHEET_SUMMARIES, GRID_SHEET_E2E)
+        )
         skip_row_bold = large_sheet and not full_format
 
         if is_ranking_sheet(safe_name):
@@ -493,7 +497,7 @@ def export_grid_workbook(
                 bold_columns=frozenset(),
             )
             _apply_ranking_sheet_format(ws, prepared)
-        elif safe_name == GRID_SHEET_SUMMARIES:
+        elif safe_name in (GRID_SHEET_SUMMARIES, GRID_SHEET_E2E):
             _apply_sheet_layout(
                 ws,
                 prepared,

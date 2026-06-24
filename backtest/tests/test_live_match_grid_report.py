@@ -8,12 +8,14 @@ import pandas as pd
 from backtest.grid.aggregator import build_grid_report
 from backtest.grid.grid_report_io import (
     GRID_REPORT_XLSX,
+    append_e2e_sheet_to_grid_report,
     write_live_match_grid_report,
 )
 from backtest.grid.study_mode import study_base_key
 from backtest.grid.translator import bot_config_to_grid_combo_dict
 from backtest.io.excel_export import (
     GRID_SHEET_DDI_EPIZODY,
+    GRID_SHEET_E2E,
     GRID_SHEET_PROP_FIRM,
     GRID_SHEET_SUMMARIES,
     GRID_SHEET_VYSLEDKY,
@@ -74,6 +76,53 @@ def test_live_match_grid_report_sheets(tmp_path: Path):
     assert load_grid_report_sheet(out, GRID_SHEET_DDI_EPIZODY).shape[0] >= 1
     with pd.ExcelFile(out) as xf:
         assert GRID_SHEET_PROP_FIRM not in xf.sheet_names
+
+
+def test_append_e2e_sheet_to_grid_report(tmp_path: Path):
+    stats = _sample_stats()
+    out = write_live_match_grid_report(stats, tmp_path)
+    assert out is not None
+    combo = stats["config"]
+    e2e_stats = {
+        **stats,
+        "net_pnl_usd": 1200.0,
+        "net_pnl_wave_usd": 1200.0,
+        "total_trades": 10,
+        "trades_wave": 10,
+        "max_drawdown_pct": -7.0,
+        "max_drawdown_pct_wave": -7.0,
+        "win_rate_pct": 52.5,
+        "ddi_profile": {
+            "dnu_testu_celkem": 90,
+            "max_ddi_pct": -9.5,
+            "p90_ddi_pct": -3.2,
+            "median_ddi_pct": -2.0,
+            "pct_dnu_ge_10": 0.0,
+        },
+    }
+    parity = {
+        "common_wave_times": 8,
+        "bt_only_wave_times": 2,
+        "lv_only_wave_times": 1,
+        "backtest_net_pnl_usd": 1500.0,
+        "live_e2e_net_pnl_usd": 1200.0,
+        "backtest_win_rate_pct": 55.0,
+        "live_e2e_win_rate_pct": 52.5,
+    }
+    out2 = append_e2e_sheet_to_grid_report(tmp_path, e2e_stats, combo, parity=parity)
+    assert out2 is not None
+    df_e2e = load_grid_report_sheet(out2, GRID_SHEET_E2E)
+    assert len(df_e2e) == 1
+    assert "max_dd_%_vs_initial" in df_e2e.columns
+    assert "max_ddi_pct" in df_e2e.columns
+    assert "p90_ddi_pct" in df_e2e.columns
+    assert "win_rate_%" in df_e2e.columns
+    assert float(df_e2e.iloc[0]["win_rate_%"]) == 52.5
+    assert float(df_e2e.iloc[0]["backtest_win_rate_%"]) == 55.0
+    assert float(df_e2e.iloc[0]["live_e2e_net_pnl_usd"]) == 1200.0
+    with pd.ExcelFile(out2) as xf:
+        assert GRID_SHEET_E2E in xf.sheet_names
+        assert GRID_SHEET_SUMMARIES in xf.sheet_names
 
 
 def test_study_base_key_hashable_with_list_values():

@@ -85,12 +85,23 @@ def run_e2e_parity_after_backtest(
     *,
     backtest_trades: list,
     backtest_stats: dict,
+    combo: dict | None = None,
 ) -> CausalGateE2EResult:
     """E2E + parity report po dokončeném backtestu (bez druhého BT běhu)."""
     from scripts.e2e_live_broker_sim import pnl_ddi_from_closed
 
+    combo_cfg = dict(combo or backtest_stats.get("config") or {})
+    date_from = combo_cfg.get("date_from")
+    date_to = combo_cfg.get("date_to")
+
     live_closed = _run_live_e2e(df, cfg)
-    lv_stats = pnl_ddi_from_closed(live_closed, bot_name=cfg.bot_name)
+    lv_stats = pnl_ddi_from_closed(
+        live_closed,
+        bot_name=cfg.bot_name,
+        date_from=str(date_from) if date_from else None,
+        date_to=str(date_to) if date_to else None,
+        combo=combo_cfg,
+    )
 
     bt_wave = _wave_only_trades(backtest_trades)
     bt_wt = {str(getattr(t, "wave_time", "")) for t in bt_wave}
@@ -109,6 +120,8 @@ def run_e2e_parity_after_backtest(
         "lv_only_wave_times": len(lv_wt - bt_wt),
         "backtest_net_pnl_usd": float(backtest_stats.get("net_pnl_usd", 0) or 0),
         "live_e2e_net_pnl_usd": float(lv_stats.get("net_pnl_usd", 0) or 0),
+        "backtest_win_rate_pct": float(backtest_stats.get("win_rate_pct", 0) or 0),
+        "live_e2e_win_rate_pct": float(lv_stats.get("win_rate_pct", 0) or 0),
         "causal_debug": causal_dbg,
     }
     return CausalGateE2EResult(
@@ -155,6 +168,8 @@ def run_causal_gate_e2e(
         "lv_only_wave_times": len(lv_only),
         "backtest_net_pnl_usd": float(bt_stats.get("net_pnl_usd", 0) or 0),
         "live_e2e_net_pnl_usd": float(lv_stats.get("net_pnl_usd", 0) or 0),
+        "backtest_win_rate_pct": float(bt_stats.get("win_rate_pct", 0) or 0),
+        "live_e2e_win_rate_pct": float(lv_stats.get("win_rate_pct", 0) or 0),
         "causal_debug": {
             k: v for k, v in bt_stats.items()
             if str(k).startswith("causal_") or k == "causal_mode"
@@ -170,11 +185,37 @@ def run_causal_gate_e2e(
     )
 
 
+def _format_stats_suffix(stats: dict) -> str:
+    parts: list[str] = []
+    wr = stats.get("win_rate_pct")
+    if wr is not None:
+        parts.append(f"WR={float(wr):.1f}%")
+    prof = stats.get("ddi_profile") or {}
+    max_dd = stats.get("max_drawdown_pct")
+    max_ddi = prof.get("max_ddi_pct")
+    p90 = prof.get("p90_ddi_pct")
+    if max_dd is not None:
+        parts.append(f"max_dd_%_vs_initial={float(max_dd):.2f}%")
+    if max_ddi is not None:
+        parts.append(f"max_ddi={float(max_ddi):.2f}%")
+    if p90 is not None:
+        parts.append(f"p90_ddi={float(p90):.2f}%")
+    return "  " + "  ".join(parts) if parts else ""
+
+
 def print_causal_gate_e2e_report(result: CausalGateE2EResult) -> None:
     p = result.parity
     print("\n=== CAUSAL GATE + E2E PARITY ===")
-    print(f"  BACKTEST WAVE: {p['backtest_wave_count']} / {p['backtest_net_pnl_usd']:.2f} USD")
-    print(f"  LIVE E2E WAVE: {p['live_e2e_wave_count']} / {p['live_e2e_net_pnl_usd']:.2f} USD")
+    print(
+        f"  BACKTEST WAVE: {p['backtest_wave_count']} / "
+        f"{p['backtest_net_pnl_usd']:.2f} USD"
+        f"{_format_stats_suffix(result.backtest_stats)}"
+    )
+    print(
+        f"  LIVE E2E WAVE: {p['live_e2e_wave_count']} / "
+        f"{p['live_e2e_net_pnl_usd']:.2f} USD"
+        f"{_format_stats_suffix(result.live_e2e_stats)}"
+    )
     print(
         f"  common={p['common_wave_times']}  BT-only={p['bt_only_wave_times']}  "
         f"LV-only={p['lv_only_wave_times']}"

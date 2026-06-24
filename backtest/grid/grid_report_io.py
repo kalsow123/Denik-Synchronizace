@@ -17,6 +17,7 @@ from backtest.io.excel_export import (
     GRID_REPORT_XLSX,
     GRID_SHEET_CHYBY,
     GRID_SHEET_DDI_EPIZODY,
+    GRID_SHEET_E2E,
     GRID_SHEET_PROP_FIRM,
     GRID_SHEET_SUMMARIES,
     GRID_SHEET_VYSLEDKY,
@@ -29,6 +30,16 @@ GRID_SUMMARIES_CSV = "grid_summaries.csv"
 GRID_PROP_FIRM_CSV = "grid_prop_firm_compliance.csv"
 GRID_ERRORS_CSV = "grid_errors.csv"
 GRID_DDI_EPIZODY_CSV = "grid_ddi_epizody.csv"
+GRID_E2E_CSV = "grid_e2e.csv"
+
+# DDi sloupce z ddi_epizody doplněné k summaries formátu (list E2E).
+E2E_DDI_EXTRA_COLUMNS: tuple[str, ...] = (
+    "max_ddi_pct",
+    "p90_ddi_pct",
+    "median_ddi_pct",
+    "pct_dnu_ge_10",
+    "dnu_testu_celkem",
+)
 
 
 def _resolve_prop_firms(profile: dict, args: Any | None) -> dict:
@@ -219,6 +230,94 @@ def write_live_match_grid_report(
     print(
         "VAROVANI: grid_report.xlsx — nainstaluj openpyxl. "
         "CSV zalohy jsou v output slozce."
+    )
+    return None
+
+
+def build_e2e_summaries_sheet(
+    live_e2e_stats: dict,
+    combo: dict,
+    *,
+    parity: dict | None = None,
+) -> pd.DataFrame:
+    """
+    List E2E — stejný formát jako summaries + DDi metriky + parity sloupce.
+    """
+    if not live_e2e_stats or "error" in live_e2e_stats:
+        return pd.DataFrame()
+    cfg = dict(combo or {})
+    bot_name = str(cfg.get("bot_name") or live_e2e_stats.get("bot_name") or "live_e2e")
+    cfg.setdefault("bot_name", bot_name)
+    results = {bot_name: {**live_e2e_stats, "config": cfg}}
+    df_report = build_grid_report(results)
+    df_summaries = build_grid_summaries_sheet(df_report, preset_names=None)
+    if df_summaries.empty:
+        return pd.DataFrame()
+
+    profile = dict(live_e2e_stats.get("ddi_profile") or {})
+    for col in E2E_DDI_EXTRA_COLUMNS:
+        if col in profile:
+            df_summaries[col] = profile[col]
+
+    wr = live_e2e_stats.get("win_rate_pct")
+    if wr is not None:
+        df_summaries["win_rate_%"] = round(float(wr), 1)
+
+    if parity:
+        df_summaries["e2e_common_wave_times"] = parity.get("common_wave_times")
+        df_summaries["e2e_bt_only_wave_times"] = parity.get("bt_only_wave_times")
+        df_summaries["e2e_lv_only_wave_times"] = parity.get("lv_only_wave_times")
+        df_summaries["backtest_net_pnl_usd"] = parity.get("backtest_net_pnl_usd")
+        df_summaries["live_e2e_net_pnl_usd"] = parity.get("live_e2e_net_pnl_usd")
+        bt_wr = parity.get("backtest_win_rate_pct")
+        if bt_wr is not None:
+            df_summaries["backtest_win_rate_%"] = round(float(bt_wr), 1)
+
+    return df_summaries
+
+
+def _load_existing_workbook_sheets(xlsx_path: Path) -> dict[str, pd.DataFrame]:
+    if not xlsx_path.is_file():
+        return {}
+    with pd.ExcelFile(xlsx_path) as xf:
+        return {
+            str(name): pd.read_excel(xf, sheet_name=name)
+            for name in xf.sheet_names
+        }
+
+
+def append_e2e_sheet_to_grid_report(
+    output_dir: Path | str,
+    live_e2e_stats: dict,
+    combo: dict,
+    *,
+    parity: dict | None = None,
+) -> Path | None:
+    """
+    Po E2E doplní/ přepíše list E2E v grid_report.xlsx (formát summaries + DDi).
+    """
+    df_e2e = build_e2e_summaries_sheet(live_e2e_stats, combo, parity=parity)
+    if df_e2e.empty:
+        return None
+
+    output_dir = Path(output_dir)
+    xlsx_path = output_dir / GRID_REPORT_XLSX
+    sheets = _load_existing_workbook_sheets(xlsx_path)
+    sheets[GRID_SHEET_E2E] = df_e2e
+
+    export_csv(df_e2e, output_dir / GRID_E2E_CSV, index=False)
+
+    if export_grid_workbook(xlsx_path, sheets):
+        parts = ", ".join(sheets.keys())
+        print(
+            f"Grid report (E2E): {xlsx_path} "
+            f"(list E2E: {len(df_e2e)} radku | listy: {parts})"
+        )
+        return xlsx_path
+
+    print(
+        "VAROVANI: grid_report.xlsx (E2E) — nainstaluj openpyxl. "
+        f"CSV zaloha: {output_dir / GRID_E2E_CSV}"
     )
     return None
 

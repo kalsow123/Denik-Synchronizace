@@ -289,8 +289,8 @@ LIVE_BOT_CONFIG = BotConfig(
     max_wave_age_hours=20,
 
     # ============== RISK MANAGEMENT ==============
-    risk_usd=500.0,
-    pp_risk_usd=500.0,
+    risk_usd=800.0,
+    pp_risk_usd=800.0,
     contract_size=100_000.0,  #L backtest; live lot z MT5
     magic=100_200,
 
@@ -336,7 +336,7 @@ LIVE_BOT_CONFIG = BotConfig(
     ext_close_trend_positions_on_bos=True,
 
     # ============== OTHERS ==============
-    bot_name="EURUSD_FTMO_n=2",  #L telemetry BOT_ID == bot_name
+    bot_name="3_EURUSD_100k_n=2_FTMO",  #L telemetry BOT_ID == bot_name
     heartbeat_interval_sec=180,  #L HEARTBEAT do jsonl kazde 3 min
     jsonl_retention_days=2,  #L jsonl: smazat radky starsi nez 2 dny (i sync do gitu)
     startup_bars=1440,  #L ~1 mesic zpetne z MT5 (M30: 30*48)
