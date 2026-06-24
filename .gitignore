@@ -18,6 +18,8 @@
 !/PROMPT_NAPOJENI_BOTA_NA_GITHUB_TELEMETRY.txt
 !/EURUSD_FXIFY_1_n=4.jsonl
 !/EURUSD_FXIFY_1_n=4_config.jsonl
+!/EURUSD_100k_n=8_FXIFY_2.jsonl
+!/EURUSD_100k_n=8_FXIFY_2_config.jsonl
 
 # ── Výjimky uvnitř povolených cest ──
 .venv/
@@ -35,6 +37,8 @@ mt5_credentials.py
 *.jsonl
 !/EURUSD_FXIFY_1_n=4.jsonl
 !/EURUSD_FXIFY_1_n=4_config.jsonl
+!/EURUSD_100k_n=8_FXIFY_2.jsonl
+!/EURUSD_100k_n=8_FXIFY_2_config.jsonl
 
 # Live bot process locks (runtime/instance_lock.py)
 locks/
