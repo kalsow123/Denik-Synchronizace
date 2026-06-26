@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import time
-import atexit
 from pathlib import Path
 
 
@@ -30,9 +29,20 @@ def _env(name: str, env_file: dict[str, str], default: str | None = None) -> str
     return os.environ.get(name, env_file.get(name, default))
 
 
+def _git_exe() -> str:
+    for candidate in (
+        os.environ.get("GIT_EXE"),
+        shutil.which("git"),
+        r"C:\Program Files\Git\bin\git.exe",
+    ):
+        if candidate and Path(str(candidate)).is_file():
+            return str(candidate)
+    return "git"
+
+
 def _run_git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *args],
+        [_git_exe(), *args],
         cwd=str(repo),
         text=True,
         capture_output=True,
@@ -114,35 +124,91 @@ def _commit_and_push(repo: Path, files_rel: list[str], branch: str, bot_id: str)
     return True
 
 
-def _acquire_sync_lock(lock_path: Path) -> bool:
+def _telemetry_repo_lock_path(repo: Path) -> Path:
+    return repo / ".telemetry_sync.lock"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        alive = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", f"Get-Process -Id {pid} -ErrorAction SilentlyContinue"],
+            capture_output=True,
+            check=False,
+        )
+        return alive.returncode == 0
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _release_sync_lock(lock_path: Path) -> None:
+    try:
+        lock_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _acquire_sync_lock(lock_path: Path, *, max_wait_sec: float = 120.0) -> bool:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    for _ in range(2):
+    deadline = time.monotonic() + max(0.0, max_wait_sec)
+    while True:
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.write(fd, str(os.getpid()).encode("ascii"))
             os.close(fd)
-            atexit.register(lambda: lock_path.unlink(missing_ok=True))
             return True
         except FileExistsError:
             try:
                 pid = int(lock_path.read_text(encoding="ascii").strip())
             except (OSError, ValueError):
                 pid = -1
-            if pid > 0:
-                alive = subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", f"Get-Process -Id {pid} -ErrorAction SilentlyContinue"],
-                    capture_output=True,
-                    check=False,
-                )
-                if alive.returncode == 0:
-                    print(f"[sync] Jiny sync proces uz bezi (PID {pid}), koncim.")
+            if _pid_alive(pid):
+                if time.monotonic() >= deadline:
+                    print(f"[sync] Lock obsazen (PID {pid}), cekani vyprselo.")
                     return False
+                time.sleep(0.25)
+                continue
             try:
                 lock_path.unlink(missing_ok=True)
             except OSError:
                 print(f"[sync] Nelze ziskat lock: {lock_path}")
                 return False
-    return False
+
+
+def _source_needs_sync(src: Path, dst: Path) -> bool:
+    if not src.exists():
+        return False
+    if not dst.exists():
+        return True
+    return not filecmp.cmp(src, dst, shallow=False)
+
+
+def _sync_changed_files(
+    repo: Path,
+    sources: list[tuple[Path, Path]],
+    branch: str,
+    bot_name: str,
+    lock_path: Path,
+) -> bool:
+    if not _acquire_sync_lock(lock_path):
+        return False
+    try:
+        changed_files: list[str] = []
+        for src, rel_target in sources:
+            if _copy_if_changed(src, repo / rel_target):
+                changed_files.append(rel_target.as_posix())
+        if not changed_files:
+            return False
+        pushed = _commit_and_push(repo, changed_files, branch, bot_name)
+        if pushed:
+            print(f"[sync] Pushed: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        return pushed
+    finally:
+        _release_sync_lock(lock_path)
 
 
 def main() -> int:
@@ -199,14 +265,13 @@ def main() -> int:
         print(f"Init chyba: {exc}")
         return 3
 
-    lock_path = Path(args.env_file).resolve().parent / "locks" / "telemetry_sync.lock"
-    if not _acquire_sync_lock(lock_path):
-        return 0
+    lock_path = _telemetry_repo_lock_path(repo)
 
     for src, rel_target in sources:
         print(f"[sync] Source: {src}")
         print(f"[sync] Target: {rel_target.as_posix()} (branch={branch})")
     print(f"[sync] Repo:   {repo}")
+    print(f"[sync] Lock:   {lock_path}")
     print(f"[sync] Poll (kontrola zmen na disku): {poll_sec}s")
     if source_config_jsonl:
         if config_interval_sec < 0:
@@ -219,7 +284,7 @@ def main() -> int:
 
     while True:
         try:
-            changed_files: list[str] = []
+            to_sync: list[tuple[Path, Path]] = []
             now_mono = time.monotonic()
             for src, rel_target in sources:
                 is_bot_config_dst = rel_target.name == "bot_config.jsonl"
@@ -238,20 +303,27 @@ def main() -> int:
                     ):
                         continue
                 dst = repo / rel_target
-                if _copy_if_changed(src, dst):
-                    changed_files.append(rel_target.as_posix())
-                if is_bot_config_dst and source_config_jsonl:
-                    if config_interval_sec < 0:
-                        try:
-                            config_mtime_seen[str(src)] = src.stat().st_mtime
-                        except OSError:
-                            pass
-                    elif config_interval_sec > 0:
-                        last_config_sync_mono = now_mono
-            if changed_files:
-                pushed = _commit_and_push(repo, changed_files, str(branch), bot_name)
-                if pushed:
-                    print(f"[sync] Pushed: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                if not _source_needs_sync(src, dst):
+                    continue
+                to_sync.append((src, rel_target))
+            if to_sync:
+                if _sync_changed_files(
+                    repo,
+                    to_sync,
+                    str(branch),
+                    bot_name,
+                    lock_path,
+                ):
+                    for src, rel_target in to_sync:
+                        is_bot_config_dst = rel_target.name == "bot_config.jsonl"
+                        if is_bot_config_dst and source_config_jsonl:
+                            if config_interval_sec < 0:
+                                try:
+                                    config_mtime_seen[str(src)] = src.stat().st_mtime
+                                except OSError:
+                                    pass
+                            elif config_interval_sec > 0:
+                                last_config_sync_mono = now_mono
             if args.once:
                 return 0
         except Exception as exc:

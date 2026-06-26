@@ -165,8 +165,16 @@ def terminate_stale_sync_processes(root: Path, *, keep_pid: int | None = None) -
     except Exception:
         pass
 
-    lock_path = root / "locks" / "telemetry_sync.lock"
-    if lock_path.is_file():
+    lock_paths = [root / "locks" / "telemetry_sync.lock"]
+    env_path = root / ".env.sync"
+    if env_path.is_file():
+        repo_raw = _parse_env(_load_env_lines(env_path)).get("TELEMETRY_REPO_PATH", "").strip()
+        if repo_raw:
+            lock_paths.append(Path(repo_raw).resolve() / ".telemetry_sync.lock")
+
+    for lock_path in lock_paths:
+        if not lock_path.is_file():
+            continue
         try:
             lock_pid = int(lock_path.read_text(encoding="ascii").strip())
         except (OSError, ValueError):
