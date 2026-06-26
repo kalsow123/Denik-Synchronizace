@@ -1,0 +1,279 @@
+NAPOJENÍ LIVE NA BACKTEST — Handoff: Varianta C (hotovo) + Varianta A (plán)
+================================================================================
+Datum: 2026-06-26
+Repo: C:\Trading_bots\FTMO_100k (git remote: synchronizace → Denik-Synchronizace)
+
+
+================================================================================
+1. KONTEXT PROJEKTU
+================================================================================
+
+Live bot:     3_EURUSD_100k_n=2_FTMO, magic 100200, EURUSD M30
+Config:       config/bot_config.py → LIVE_BOT_CONFIG
+              wave_positions_only=True, wave_isolation_study=True, tp_mode=WAVE_TARGET_N
+Období testu: 2025-11-10 → 2026-05-09, data data/EURUSD_M30.csv
+Python:       .venv\Scripts\python.exe
+
+Cíl parity: Live má dělat REALISTICKY dosažitelná stejná rozhodnutí jako backtest
+WAVE slice — ne nutně identické 39k PnL, pokud část backtestu vychází z look-ahead
+nebo wave-isolation designu.
+
+Dokumentace:  MAIN CHANGE.txt — kompletní audit log (sekce 1–24).
+
+
+================================================================================
+2. ARCHITEKTURA DNES (proč existuje varianta A)
+================================================================================
+
+config/ + strategy/ + core/          ← sdílené
+        ↓
+┌───────────────────────┬───────────────────────────┐
+│ backtest/engine.py    │ runtime/live_loop.py      │  ← DVA orchestrátory
+│ BacktestEngine        │ + missed_bar_replay       │     (~3733 + ~2535 řádků)
+│                       │ + wf_live, ext_live…      │
+└───────────────────────┴───────────────────────────┘
+        ↓                           ↓
+   simulace fill                 MT5 (infra/*)
+
+Live NEIMPORTUJE BacktestEngine — sdílí jen strategy/*. Parita se dosud ladila
+ručním srovnáváním obou větví (varianta C). To funguje, ale drift je strukturální
+riziko.
+
+
+================================================================================
+3. VARIANTA C — CO JSME POSTAVILI A OVĚŘILI
+================================================================================
+
+Myšlenka: Postupná migrace v tomto repu. Dva orchestrátory zůstávají, modul po
+modulu srovnat live s backtesterem. Dual testy + E2E měření. Tento repo = produkce
++ fallback.
+
+
+3.1 PROVEDENÉ OPRAVY (produkční nebo E2E-verifikované)
+------------------------------------------------------
+
+#  | Soubory                              | Co řešilo
+---|--------------------------------------|------------------------------------------
+1  | runtime/live_wave_isolation.py       | Guard: povoleny EXT-primary (EWP_*) a
+   |                                      | BOS-retro vstupy jako WAVE; stále
+   |                                      | blokováno two_sided mirror
+2  | runtime/missed_bar_replay.py         | Replay gates: post_ext lock, two-sided
+   |                                      | routing, tracker — parita s live_loop
+3  | scripts/e2e_live_broker_sim.py       | E2E harness: Fake MT5 + skutečný live
+   |                                      | kód pro exity; měření WAVE PnL/DDi vs engine
+4  | strategy/wf_wave_list.py             | WF birth map: sdílená wave_birth_by_time
+   | runtime/wf_live.py                   | po WF merge
+5  | runtime/wf_live.py                   | Trend wave-set: aktualizace waves_by_bar
+   |                                      | po WF merge (398 vln = engine)
+6  | runtime/live_loop.py                 | FIX #1 pre-WF trend: trend_states_per_bar
+   | scripts/e2e_live_broker_sim.py       | z vln PŘED WF merge (jako engine)
+   |                                      | → +~1971 USD E2E
+7  | runtime/missed_bar_replay.py         | §22 B+ two-sided: TS2_ routing před
+   | infra/orders.py                      | trend_filter; promoted set pro BOS close
+   | runtime/live_loop.py                 |
+   | scripts/e2e_live_broker_sim.py       |
+8  | infra/trade_tracker.py               | §23 TS2 promote: parsování TS2_ komentářů,
+   | runtime/two_sided_promote_live.py    | TP clear po promote
+   | scripts/e2e_live_broker_sim.py       |
+9  | strategy/two_sided.py                | §24 TS2 lot sizing: lot mirror jako engine
+   | infra/orders.py                      | W-primary (vlna 202603250100: 6.41 lot ✓)
+   | scripts/e2e_live_broker_sim.py       |
+   | runtime/missed_bar_replay.py         |
+   | runtime/live_loop.py                 |
+10 | runtime/missed_bar_replay.py         | Cold-start replay: apply_mt5_effects=False
+   | runtime/live_loop.py                 | při prvním catch-up — recovery pendingy
+   | runtime/wave_target_n_bar.py         | se neruší historickým BOS
+11 | scripts/restart_bot.ps1              | Ops: bezpečný stop→start bota
+
+
+3.2 DIAGNOSTICKÉ NÁSTROJE (ne produkce)
+---------------------------------------
+- scripts/live_replay_parity.py       — placement parity
+- scripts/verify_guard_parity.py
+- scripts/_diag_*.py                  — desítky one-off diagnostik
+
+
+3.3 METRIKY — VÝVOJ E2E (WAVE slice, EURUSD M30, LIVE_BOT_CONFIG)
+-------------------------------------------------------------------
+
+Fáze                              | Backtest WAVE    | Live E2E WAVE    | Poznámka
+----------------------------------|------------------|------------------|------------------
+Start (E2E_FIRE_ON_BIRTH=1)       | 164 / +39 041    | 159 / +10 996    | gap −28k
+Produkční E2E (bez flagu)         | 164 / +39 041    | 154 / +25 013    | common 132 vln Δ −741
+Po FIX #1                         | 164 / +39 041    | 151 / +26 984    | +1971 USD
+Po §22–§24 (B+ ON, study flag)    | 164 / +39 041    | 173 / +36 557    | zbývá ~2,5k gap
+
+
+3.4 KLÍČOVÁ ZJIŠTĚNÍ C
+-----------------------
+
+132 společných vln:
+  - Vstupní parita ~120/132 (EP ≤ 1 pip)
+  - Common delta v produkčním režimu ≈ −741 USD
+
+32 BT-only vln (+~14k):
+  - Mix look-ahead, two-sided mirror promoce v engine, trend_filter
+  - Ne vše kauzálně replikovatelné
+
+Exit timing:
+  - Systematický BOS-vs-TP bug NEBYL potvrzen po auditu (MAIN CHANGE §16)
+  - Většina common gapu = look-ahead retro entry engine
+
+FIX #2 (retro-BOS / two-sided promo):
+  - Záměrně NEIMPLEMENTOVÁN
+  - wave_isolation_study=True blokuje mirror send
+  - MT5 komentář je neměnný → engine in-memory promoce nelze věrně replikovat
+
+Look-ahead v backtestu:
+  - ~5–9 vln, +903 USD — live NEMŮŽE replikovat
+  - Oprava = změna backtest reference, ne live
+
+session_enabled:
+  - Produkce ruší pendingy 23:40 GMT+3
+  - E2E to nemodeluje (záměr bota, ne bug)
+
+Coupling:
+  - Live nemá coupling na BacktestEngine — jen sdílené strategy/
+
+
+3.5 CO C ZÁMĚRNĚ NEUDĚLALA
+--------------------------
+- Nenapojila live na BacktestEngine jako jeden engine
+- missed_bar_replay zůstává paralelní větev (ne N× stejný process_bar)
+- Main-loop E2E (run_live_loop + mock I/O) — nehotovo
+- Varianta A — nezačata
+
+
+3.6 GIT STAV (k ~2026-06-24)
+----------------------------
+- Commit 8dfa29a na synchronizace/main: cold-start replay + restart script + testy
+- Necommitnuto: telemetry/jsonl sync, .env.sync
+
+
+================================================================================
+4. VARIANTA A — CO JSME ŘEŠILI (diskuze, ne implementace)
+================================================================================
+
+Myšlenka: Jeden zdroj pravdy pro rozhodování na uzavřeném baru. Backtest i live
+volají totéž; liší se jen executor (simulace vs MT5).
+
+    strategy/ + config/
+            ↓
+       BarProcessor.process_bar(i, ctx)    ← extrakce z BacktestEngine.run()
+            ↓
+       ┌────┴────┐
+    BacktestExecutor              LiveExecutor
+    (sim pending/trades/SL/TP)    (infra/orders → MT5)
+            ↓                              ↓
+    backtest/engine.py (tenký)    runtime/live_loop.py (tenký: polling, session, data)
+
+
+4.1 ROZHRANÍ (navrhované)
+-------------------------
+
+BarProcessor — na každém baru stejné pořadí jako engine:
+  1. pending trigger
+  2. SL/TP check
+  3. BOS / TP_WAVE_N / G-ext exity
+  4. wave detection + WF + EXT
+  5. nové signály / expiry
+
+Executor protocol — I/O hranice:
+  - place_pending, place_market, close_position, cancel_pending, modify_sltp
+  - get_open_positions, get_pendings
+  - Processor NEROZHODUJE o fill modelu — executor ano (sim vs broker)
+
+BarProcessorState — jeden stav místo duplicit:
+  - sent_signals, WF tracker, BOS flip map, wave_birth_by_time, two-sided tracker,
+    ADX gate stav…
+
+Missed-bar replay — v A ideálně zmizí:
+  - catch-up = N× process_bar(), ne jiná logika v missed_bar_replay.py
+
+
+4.2 TŘI VARIANTY SJEDNOCENÍ (z původní diskuse)
+------------------------------------------------
+
+Varianta | Popis
+---------|----------------------------------------------------------------------
+A        | BarProcessor + dual executor. Extrakce process_bar(). Čistá architektura.
+B        | Live = engine + adapter. BacktestEngine běží live s MT5 adapterem.
+         | Rychlejší, ale engine monolit zůstane.
+C        | Postupná parita. Hotovo v FTMO_100k. Dva orchestrátory, ruční sync.
+
+Schválený plán: C dokončit/tag → A v novém repu (čistý start); FTMO_100k zamrzne
+jako produkční fallback.
+
+
+4.3 CO Z C PŘENÉST DO A
+-----------------------
+- Ověřené strategy/*, config/*, parity testy (ne _diag_*)
+- E2E koncept → LiveExecutor režim nad CSV
+- Znalosti z FIX #1, WF birth, TS2 pipeline — jako chování BarProcessoru,
+  ne jako duplicitní live kód
+
+
+4.4 CO A NEvyřeší SAMO
+----------------------
+- Backtest look-ahead (reference PnL)
+- wave_isolation_study vs engine two-sided promoce (design volba)
+- Session gate, spread/slippage, EXT-1 broker ochrana
+- Fill timing intrabar (tick vs bar-close)
+
+
+4.5 OTEVŘENÉ DESIGN OTÁZKY PRO PRŮZKUM A
+----------------------------------------
+1. Extrakce strategie: strangler fig z engine.run() po fázích, nebo rewrite od nuly
+   s testy?
+2. Wave detection: precompute celého DF (rychlý BT) vs kauzální prefix df[:i+1]
+   (parita s live) — jeden režim nebo dva?
+3. Kde začít slice: WAVE-only (vstupy + BOS/TP) vs celý engine (WF, EXT, PP)?
+4. Nový repo struktura: core/bar_processor.py, executors/backtest.py,
+   executors/live.py?
+5. Parity gate: E2E = LiveExecutor na CSV musí dát stejné signály jako
+   BacktestExecutor — CI povinnost?
+6. Varianta B jako mezikrok? Rychlejší než full extract, ale ponechá ~3700 řádkový
+   engine?
+
+
+4.6 KLÍČOVÉ SOUBORY PRO STUDIUM A
+---------------------------------
+backtest/engine.py              — zdroj BarProcessor (~3733 řádků)
+                                  run() + _process_new_wave + _trigger_pending
+runtime/live_loop.py            — co nahradit tenkým wrapperem (~2535 řádků)
+runtime/missed_bar_replay.py    — co eliminovat
+scripts/e2e_live_broker_sim.py  — současný parity harness (vzor pro LiveExecutor test)
+strategy/*                      — už sdílené, do A kopírovat
+config/bot_config.py            — LIVE_BOT_CONFIG
+MAIN CHANGE.txt                 — §14–24 detailní log C
+
+
+================================================================================
+5. PŘÍKAZY PRO REPRODUKCI PARITY (E2E)
+================================================================================
+
+cd C:\Trading_bots\FTMO_100k
+
+# Produkční režim (draw_right TP timing):
+.venv\Scripts\python.exe scripts/e2e_live_broker_sim.py
+
+# Engine-aligned TP (birth):
+$env:E2E_FIRE_ON_BIRTH="1"
+.venv\Scripts\python.exe scripts/e2e_live_broker_sim.py
+
+
+================================================================================
+6. ÚKOL PRO NOVÝ CURSOR (průzkum varianty A)
+================================================================================
+
+NEIMPLEMENTOVAT hned. Prozkoumat efektivní cestu k variantě A:
+  - jak extrahovat BarProcessor z BacktestEngine s minimálním rizikem
+  - jak vypadá executor protocol
+  - pořadí fází a první slice (WAVE?)
+  - nový repo vs pod-složka
+  - zda B (engine+adapter) není rychlejší mezikrok než full A
+
+Výstup: návrh architektury + fázovaný plán + odhad rizik.
+
+FTMO_100k na VPS nechat jako produkční fallback — kód číst z repa, ne spouštět
+těžké běhy na VPS.
