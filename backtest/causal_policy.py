@@ -26,7 +26,13 @@ class CausalBacktestPolicy:
 
 
 def policy_from_cfg(cfg: BotConfig) -> CausalBacktestPolicy:
+    # COUPLING (pravidlo #5): wave_detection_mode == "incremental_causal" MUSI
+    # zapnout kauzalni brany i kdyby causal_mode nebyl propsan (defense-in-depth
+    # vedle BotConfig.__post_init__). Grid (legacy_precompute) zustava bez bran.
     on = bool(getattr(cfg, "causal_mode", False))
+    mode = getattr(cfg, "wave_detection_mode", None)
+    if mode is not None and str(getattr(mode, "value", mode)) == "incremental_causal":
+        on = True
     return CausalBacktestPolicy(enabled=on)
 
 

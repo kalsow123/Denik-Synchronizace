@@ -124,6 +124,28 @@ class TpWaveIntrabarPriority(str, Enum):
     SL_BEFORE_TP = "sl_before_tp"
 
 
+# ───── REŽIM DETEKCE VLN (legacy precompute vs incremental causal) ────────
+class WaveDetectionMode(str, Enum):
+    """
+    Jak engine ziskava vlny pro rozhodovani (viz VARIANTA A.txt, sekce 3.2 / 4.3).
+
+    LEGACY_PRECOMPUTE (default — chovani jako dnes, nutne pro grid)
+      - run_pine_wave_simulation(cele df) jednou + post-process (wave_plus extend
+        az ke konci rady, merge pres gapy, wick cleanup) s vedomim budoucnosti.
+      - causal_mode zustava default (False pro grid) — viz pravidlo #6.
+
+    INCREMENTAL_CAUSAL (referencni rezim pro live paritu)
+      - per-bar inkrementalni detektor (PineWaveDetector.advance(i)) — vlny s
+        birth == i, wave_plus extend max do bar_i (NE do last_ix), stav drzeny
+        inkrementalne mezi bary (O(n)).
+      - MUSI vynutit causal_mode=True (tvrde provazani — viz pravidlo #5,
+        BotConfig.__post_init__ + causal_policy.policy_from_cfg).
+    """
+
+    LEGACY_PRECOMPUTE  = "legacy_precompute"
+    INCREMENTAL_CAUSAL = "incremental_causal"
+
+
 # ───── REŽIM RUŠENÍ PENDING LIMITŮ (nad rámec tp_mode) ───────────────────
 class PendingCancelMode(str, Enum):
     """

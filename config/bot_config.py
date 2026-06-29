@@ -25,6 +25,7 @@ from config.enums import (
     TpWaveEarlyMode,
     TpWaveExitOn,
     TpWaveIntrabarPriority,
+    WaveDetectionMode,
 )
 
 
@@ -60,6 +61,10 @@ class BotConfig:
     symbol:          str   = "EU50p"
     timeframe:       int   = mt5.TIMEFRAME_M30
     wave_min_pct:    float = 0.55
+    # Zdroj vln pro engine: legacy_precompute (default, jako dnes — nutne pro grid)
+    # vs incremental_causal (referencni rezim pro live paritu). incremental_causal
+    # tvrde vynuti causal_mode=True (viz __post_init__). Viz VARIANTA A.txt §3.2/§4.3.
+    wave_detection_mode: WaveDetectionMode = WaveDetectionMode.LEGACY_PRECOMPUTE
     # Backtest-only: kauzální brány (retro po birth, clamp EP/SL) — parita s live; grid default False
     causal_mode: bool = False
     # Backtest-only: po BT spustit live E2E parity (replay + fake MT5); ne pro grid
@@ -218,6 +223,13 @@ class BotConfig:
         final = bool(self.bos_entry_enable) or bool(self.bos_reentry_enabled)
         self.bos_entry_enable = final
         self.bos_reentry_enabled = final
+        # COUPLING (pravidlo #5): incremental_causal MUSI vynutit causal_mode=True.
+        # Drzeno na urovni configu (jediny zdroj pravdy) — plati i po
+        # dataclasses.replace() (grid translator, resolve_grid_engine_config),
+        # protoze replace() znovu vola __post_init__. Grid (legacy_precompute
+        # default) zustava causal_mode=False — pravidlo #6.
+        if self.wave_detection_mode == WaveDetectionMode.INCREMENTAL_CAUSAL:
+            self.causal_mode = True
         from strategy.wave_target_n_mode import normalize_wave_target_n_cfg
         normalize_wave_target_n_cfg(self)
 

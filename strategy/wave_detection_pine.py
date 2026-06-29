@@ -1194,6 +1194,398 @@ def run_pine_wave_simulation(
     return waves, birth, ext_counter_suppress_from_bar, ext_forming_first_bar
 
 
+class PineWaveDetector:
+    """
+    Inkrementalni (per-bar) stavovy detektor vln — kauzalni protejsek
+    `run_pine_wave_simulation`.
+
+    Motivace (VARIANTA A.txt §3.2): `run_pine_wave_simulation` je jeden velky
+    stavovy loop nad CELYM df + look-ahead post-processing (wave_plus extend az
+    do last_ix, merge pres gapy, wick cleanup). Live vola detekci nad prefixem
+    df, takze vidi jine vlny. Tento detektor vytahuje vnitrni stav loopu do
+    objektu s metodou `advance(i)`, ktera zpracuje PRAVE JEDEN bar a vrati vlny
+    narozene (birth == i) na tomto baru.
+
+    Kauzalni rozdily oproti legacy:
+      - wave_plus extend max do bar_i (NE do last_ix) — vlna pri narozeni vidi
+        jen data do baru i.
+      - ZADNY look-ahead post-processing (merge pres gapy / wick cleanup /
+        weekend_gap relax / hh_hl pass) — ten je full-series a patri do legacy.
+        (Birth-parita legacy vs incremental je predmet akce 1C.)
+
+    Slozitost: stav se drzi inkrementalne mezi bary, `advance(i)` je O(1)
+    amortizovane (jen mensi gap-bridge / wave_plus segment), takze cely beh
+    advance(1..n) je O(n) — NE O(n^2). Detektor NIKDY nevola
+    `detect_waves(df[:i+1])` ani `from_seed` re-run celeho segmentu.
+
+    Pouziti:
+        det = PineWaveDetector(df, cfg)
+        for i in range(1, len(df)):
+            born = det.advance(i)   # 0..1 vln s birth == i
+
+    `start_bar` / `initial_state` maji stejnou semantiku jako u
+    `run_pine_wave_simulation` (segmentovy resume), drzi se ale inkrementalne.
+    """
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        cfg: BotConfig,
+        *,
+        start_bar: int = 1,
+        initial_state: dict | None = None,
+    ) -> None:
+        from backtest.ohlc_arrays import ohlc_from_dataframe
+
+        self.df = df
+        self.cfg = cfg
+        self.ohlc = ohlc_from_dataframe(df) if (df is not None and len(df) >= 1) else None
+        self.n_bars = self.ohlc.n if self.ohlc is not None else 0
+        self.after_data_gap = (
+            self.ohlc.after_data_gap.tolist() if self.ohlc is not None else []
+        )
+
+        self._wave_plus = bool(getattr(cfg, "wave_plus", False))
+
+        # birth mapa a (volitelne) ext counter mapy se plni inkrementalne.
+        self.birth: Dict[str, int] = {}
+        self.ext_counter_suppress_from_bar: Dict[str, int] = {}
+        self.ext_forming_first_bar: Dict[str, int] = {}
+        self._all_waves: List[dict] = []
+
+        # --- stav detekce (mirror run_pine_wave_simulation, lines ~899-948) ---
+        if initial_state is not None:
+            self.pivot_price = float(initial_state["pivot_price"])
+            self.pivot_time = initial_state["pivot_time"]
+            self.pivot_bar = int(initial_state["pivot_bar"])
+            self.pivot_dir = int(initial_state["pivot_dir"])
+            self.cand_price = float(initial_state["cand_price"])
+            self.cand_time = initial_state["cand_time"]
+            self.cand_bar = int(initial_state["cand_bar"])
+            self.w_qualified = bool(initial_state.get("w_qualified", False))
+            self.opp_cnt = int(initial_state.get("opp_cnt", 0))
+            self.forming_ext_first_hit = int(
+                initial_state.get("forming_ext_first_hit", -1)
+            )
+        elif self.ohlc is not None:
+            self.pivot_price = float(self.ohlc.high[0])
+            self.pivot_time = self.ohlc.time_at(0)
+            self.pivot_bar = 0
+            self.pivot_dir = 1
+            self.cand_price = float(self.ohlc.low[0])
+            self.cand_time = self.ohlc.time_at(0)
+            self.cand_bar = 0
+            self.w_qualified = False
+            self.opp_cnt = 0
+            self.forming_ext_first_hit = -1
+        else:
+            self.pivot_price = 0.0
+            self.pivot_time = None
+            self.pivot_bar = 0
+            self.pivot_dir = 1
+            self.cand_price = 0.0
+            self.cand_time = None
+            self.cand_bar = 0
+            self.w_qualified = False
+            self.opp_cnt = 0
+            self.forming_ext_first_hit = -1
+
+        # --- EXT range / counter stav (mirror lines ~925-948) ---
+        from strategy.ext_range import (
+            ExtRangeMeasureTracker,
+            ExtRangeTracker,
+            ext_range_enabled,
+        )
+
+        self.ext_tracker = ExtRangeTracker()
+        self.ext_measure_tracker = ExtRangeMeasureTracker()
+        self.ext_range_on = ext_range_enabled(cfg)
+        self.ext_counter_on = bool(getattr(cfg, "ext_enabled", False)) and bool(
+            getattr(cfg, "ext_counter_enabled", False)
+        )
+        self.ext_size_thr = float(getattr(cfg, "ext_wave_min_pct", 0.0) or 0.0)
+        self.ext_counter_watch_wt: str | None = None
+        self.ext_counter_watch_from_bar = -1
+
+        self._next_bar = max(1, int(start_bar))
+
+    def _causal_wave_plus(self, sig: dict, born_bar: int) -> None:
+        """
+        Kauzalni wave_plus: protahni draw_right vlny `sig` k baru `born_bar`
+        (NE do last_ix) a prepocti box/fib/sl/tp ze segmentu [draw_left..born_bar].
+
+        Stejny vzorec jako `_apply_wave_plus_extend`, ale horni mez je aktualni
+        (birth) bar — vlna pri narozeni nesmi videt budoucnost.
+        """
+        if self.ohlc is None:
+            return
+        wdir = int(sig["dir"])
+        left = int(sig["draw_left"])
+        cur_right = int(sig["draw_right"])
+        gap_end = max(cur_right, int(born_bar))
+        last_ix = self.n_bars - 1
+        if gap_end > last_ix:
+            gap_end = last_ix
+        lo, hi = min(left, gap_end), max(left, gap_end)
+        if hi < lo:
+            return
+        bt, bb = _segment_extremes_with_gaps(
+            self.df, lo, hi, wdir, self.after_data_gap, ohlc=self.ohlc,
+        )
+        if bt <= bb:
+            return
+        pivot_level = bb if wdir == 1 else bt
+        cand_level = bt if wdir == 1 else bb
+        new_sig = _append_wave_sig(
+            self.cfg,
+            w_dir=wdir,
+            pivot_level=float(pivot_level),
+            cand_level=float(cand_level),
+            box_top=bt,
+            box_bottom=bb,
+            pivot_bar_idx=left,
+            cand_bar_idx=gap_end,
+            wave_time_str=str(sig["wave_time"]),
+        )
+        if new_sig is not None:
+            sig.update(new_sig)
+
+    def advance(self, i: int) -> List[dict]:
+        """
+        Zpracuj PRAVE JEDEN bar `i` (musi se volat sekvencne, vzestupne) a vrat
+        seznam vln narozenych (birth == i) na tomto baru (0 nebo 1 vlna).
+        """
+        if self.ohlc is None or i < 1 or i >= self.n_bars:
+            return []
+        if i < self._next_bar:
+            raise ValueError(
+                f"PineWaveDetector.advance: bar {i} < ocekavany {self._next_bar} "
+                f"(volej sekvencne vzestupne; inkrementalni stav nelze vracet)."
+            )
+        # Povol preskoceni baru jen pokud volajici opravdu prochazi vsechny bary;
+        # mezilehle bary musi projit stavovym strojem, jinak stav nesedi.
+        while self._next_bar < i:
+            self._step(self._next_bar)
+            self._next_bar += 1
+        born = self._step(i)
+        self._next_bar = i + 1
+        return born
+
+    def _step(self, i: int) -> List[dict]:
+        """Jeden krok stavoveho stroje pro bar i — port loop body z
+        run_pine_wave_simulation (lines ~950-1141), bez look-ahead post-procesu."""
+        ohlc = self.ohlc
+        cfg = self.cfg
+        after_data_gap = self.after_data_gap
+        n_bars = self.n_bars
+        born_waves: List[dict] = []
+
+        high = float(ohlc.high[i])
+        low = float(ohlc.low[i])
+        open_ = float(ohlc.open[i])
+        close_ = float(ohlc.close[i])
+        t = ohlc.time_at(i)
+
+        w_dir = -self.pivot_dir
+
+        if after_data_gap[i]:
+            prev_close = float(ohlc.close[i - 1])
+            prev_high = float(ohlc.high[i - 1])
+            prev_low = float(ohlc.low[i - 1])
+            prev_time = ohlc.time_at(i - 1)
+            (
+                self.pivot_price,
+                self.cand_price,
+                pivot_ref,
+                cand_ref,
+            ) = _bridge_gap_prices_with_refs(
+                w_dir,
+                self.pivot_price,
+                self.cand_price,
+                prev_close=prev_close,
+                prev_high=prev_high,
+                prev_low=prev_low,
+                open_=open_,
+                high=high,
+                low=low,
+            )
+            if pivot_ref == "prev":
+                self.pivot_time = prev_time
+                self.pivot_bar = i - 1
+            elif pivot_ref == "cur":
+                self.pivot_time = t
+                self.pivot_bar = i
+            if cand_ref == "prev":
+                self.cand_time = prev_time
+                self.cand_bar = i - 1
+            elif cand_ref == "cur":
+                self.cand_time = t
+                self.cand_bar = i
+
+        invalidate = False
+        if not self.w_qualified:
+            if w_dir == 1 and low < self.pivot_price:
+                invalidate = True
+            elif w_dir == -1 and high > self.pivot_price:
+                invalidate = True
+
+        if invalidate:
+            self.pivot_price = self.cand_price
+            self.pivot_time = self.cand_time
+            self.pivot_bar = self.cand_bar
+            self.pivot_dir = w_dir
+            self.cand_price = low if w_dir == 1 else high
+            self.cand_time = t
+            self.cand_bar = i
+            self.opp_cnt = 0
+            self.w_qualified = False
+            self.forming_ext_first_hit = -1
+
+        is_opp_now = _is_opp_bar(w_dir, close_, open_)
+        gap_bar = bool(after_data_gap[i])
+        effective_is_opp = is_opp_now and not gap_bar
+
+        if not invalidate:
+            if w_dir == 1:
+                if high > self.cand_price:
+                    self.cand_price = high
+                    self.cand_time = t
+                    self.cand_bar = i
+                    self.opp_cnt = 1 if (effective_is_opp and self.w_qualified) else 0
+                elif effective_is_opp and self.w_qualified:
+                    self.opp_cnt += 1
+            else:
+                if low < self.cand_price:
+                    self.cand_price = low
+                    self.cand_time = t
+                    self.cand_bar = i
+                    self.opp_cnt = 1 if (effective_is_opp and self.w_qualified) else 0
+                elif effective_is_opp and self.w_qualified:
+                    self.opp_cnt += 1
+
+        move_pct = (
+            abs(self.cand_price - self.pivot_price)
+            / max(1e-12, abs(self.pivot_price))
+            * 100.0
+        )
+        from strategy.ext_range import ext_range_wave_min_pct
+
+        wave_min_thr = (
+            ext_range_wave_min_pct(cfg)
+            if self.ext_range_on and self.ext_measure_tracker.active
+            else float(cfg.wave_min_pct)
+        )
+        if (not self.w_qualified) and move_pct >= wave_min_thr:
+            self.w_qualified = True
+
+        if self.ext_counter_on and self.ext_size_thr > 0.0 and move_pct >= self.ext_size_thr:
+            if self.forming_ext_first_hit < 0:
+                self.forming_ext_first_hit = i
+
+        do_confirm = self.w_qualified and self.opp_cnt >= int(cfg.min_opp_bars)
+        if do_confirm and i + 1 < n_bars and after_data_gap[i + 1]:
+            do_confirm = False
+
+        if (
+            self.ext_counter_on
+            and self.ext_size_thr > 0.0
+            and self.ext_counter_watch_wt
+            and i > self.ext_counter_watch_from_bar
+            and self.ext_counter_watch_wt not in self.ext_counter_suppress_from_bar
+            and move_pct >= self.ext_size_thr
+        ):
+            self.ext_counter_suppress_from_bar[self.ext_counter_watch_wt] = i
+
+        if do_confirm:
+            box_top = self.cand_price if w_dir == 1 else self.pivot_price
+            box_bot = self.pivot_price if w_dir == 1 else self.cand_price
+
+            if box_top > box_bot and self.cand_bar > self.pivot_bar:
+                wt_str = _format_wave_time_str(ohlc.time_at(self.cand_bar))
+                sig = _append_wave_sig(
+                    cfg,
+                    w_dir=w_dir,
+                    pivot_level=float(self.pivot_price),
+                    cand_level=float(self.cand_price),
+                    box_top=box_top,
+                    box_bottom=box_bot,
+                    pivot_bar_idx=self.pivot_bar,
+                    cand_bar_idx=self.cand_bar,
+                    wave_time_str=wt_str,
+                )
+                if sig is not None:
+                    from strategy.ext_logic import is_ext_wave
+                    from strategy.ext_range import (
+                        on_wave_confirmed_in_ext_measure_range,
+                        on_wave_confirmed_in_ext_range,
+                        start_ext_range,
+                        start_ext_range_measure,
+                        tag_wave_ext_post_trend_seed,
+                        tag_wave_ext_range,
+                    )
+
+                    tag_wave_ext_post_trend_seed(sig, trend_dir=None)
+                    if self.ext_range_on:
+                        if is_ext_wave(sig, cfg):
+                            start_ext_range(self.ext_tracker, sig)
+                            start_ext_range_measure(self.ext_measure_tracker, sig)
+                            tag_wave_ext_range(sig, in_range=True)
+                        else:
+                            tag_wave_ext_range(
+                                sig, in_range=bool(self.ext_tracker.active)
+                            )
+                            if self.ext_tracker.active:
+                                confirmed_dir = on_wave_confirmed_in_ext_range(
+                                    self.ext_tracker, sig, cfg
+                                )
+                                if confirmed_dir in (1, -1):
+                                    tag_wave_ext_range(sig, in_range=False)
+                                    tag_wave_ext_post_trend_seed(
+                                        sig, trend_dir=confirmed_dir,
+                                    )
+                            if self.ext_measure_tracker.active:
+                                on_wave_confirmed_in_ext_measure_range(
+                                    self.ext_measure_tracker, sig, cfg,
+                                )
+
+                    # Kauzalni wave_plus: extend max do aktualniho (birth) baru.
+                    if self._wave_plus:
+                        self._causal_wave_plus(sig, i)
+
+                    self.birth[sig["wave_time"]] = i
+                    self._all_waves.append(sig)
+                    born_waves.append(sig)
+
+                    if self.ext_counter_on and self.ext_size_thr > 0.0:
+                        wt_sig = str(sig["wave_time"])
+                        if is_ext_wave(sig, cfg):
+                            if self.forming_ext_first_hit >= 0:
+                                self.ext_forming_first_bar[wt_sig] = (
+                                    self.forming_ext_first_hit
+                                )
+                            self.ext_counter_watch_wt = wt_sig
+                            self.ext_counter_watch_from_bar = i
+                        elif (
+                            self.ext_counter_watch_wt
+                            and i > self.ext_counter_watch_from_bar
+                        ):
+                            self.ext_counter_watch_wt = None
+                            self.ext_counter_watch_from_bar = -1
+                    self.forming_ext_first_hit = -1
+
+            self.pivot_price = self.cand_price
+            self.pivot_time = self.cand_time
+            self.pivot_bar = self.cand_bar
+            self.pivot_dir = w_dir
+            self.cand_price = low if w_dir == 1 else high
+            self.cand_time = t
+            self.cand_bar = i
+            self.opp_cnt = 0
+            self.w_qualified = False
+
+        return born_waves
+
+
 def detect_waves_pine(df, cfg: BotConfig) -> List[dict]:
     from backtest.wave_sim_cache import run_pine_wave_simulation_cached
 

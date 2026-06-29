@@ -218,6 +218,10 @@ def _bot_config_to_grid_dict(cfg: BotConfig) -> dict:
 _LIVE_ONLY_SKIP_GRID_MERGE = frozenset({
     "live_study_two_sided_mirror_orders",
     "live_study_promoted_two_sided_as_wave",
+    # Grid neresi zdroj vln — drz se zdrojoveho cfg, jinak by grid translator
+    # (default legacy_precompute) prepsal incremental_causal zpet na legacy.
+    # Grid samo wave_detection_mode nikdy nenastavuje → grid chovani beze zmeny.
+    "wave_detection_mode",
 })
 
 
