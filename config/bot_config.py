@@ -272,6 +272,17 @@ class BotConfig:
     # Modelovat live session pre-close cancel_all_pendings v backtestu.
     backtest_model_session_pre_close_cancel: bool = False
 
+    # ============== FÁZE 2 / 2B STRANGLER (default OFF = dnešní live beze změny) ==
+    # Feature flag pro strangler vrstvu (VARIANTA A.txt §5.2, akce 2B):
+    #   False (default) = live_loop běží PŘESNĚ jako dnes — duplicitní rozhodování
+    #                     (detect_waves + send_order bloky). Gate čistý, produkce
+    #                     beze změny.
+    #   True            = live_loop deleguje rozhodování na
+    #                     runtime.live_engine_session.LiveEngineSession.process_closed_bars
+    #                     (jeden rozhodovač = BacktestEngine.process_bar). Dnešní
+    #                     rozhodovací bloky se OBEJDOU (NEMAŽÍ se — to je 2B-cleanup/2G).
+    live_use_process_bar: bool = False
+
     def __post_init__(self) -> None:
         """Sjednoti novy a starsi alias pro BOS entry prepinac."""
         final = bool(self.bos_entry_enable) or bool(self.bos_reentry_enabled)

@@ -222,6 +222,9 @@ _LIVE_ONLY_SKIP_GRID_MERGE = frozenset({
     # (default legacy_precompute) prepsal incremental_causal zpet na legacy.
     # Grid samo wave_detection_mode nikdy nenastavuje → grid chovani beze zmeny.
     "wave_detection_mode",
+    # 2B strangler feature flag — live-only, grid ho nezna; drz se zdrojoveho cfg,
+    # at resolve_grid/live_execution_config nesmaze zapnuty flag zpet na False.
+    "live_use_process_bar",
 })
 
 

@@ -966,6 +966,12 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
     # Posledni uzavreny bar, na kterem uz probehla strategie (5s polling preskoci duplicitu).
     last_processed_closed_bar_time: Optional[pd.Timestamp] = None
 
+    # 2B STRANGLER (VARIANTA A.txt §5.2): feature flag live_use_process_bar.
+    # Default OFF → tato session se NIKDY nevytvoří a live_loop běží jako dnes.
+    # True → rozhodování deleguje na LiveEngineSession.process_closed_bars
+    # (jeden rozhodovač = BacktestEngine.process_bar). Vytvoří se líně níže.
+    live_engine_session = None  # type: ignore[var-annotated]
+
     # WAVE_TARGET_N — TP-vlny W(N) uz zpracovane; forming_tp_watch pro G.
     # Po restartu / kazdem cyklu sync z historickych vln + MT5 CNTR_ (parita backtest).
     processed_tp_wave_times: Set[str] = set()
@@ -1313,6 +1319,26 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                 )
 
             last_processed_closed_bar_time = closed_bar_ts
+
+            # ───── 2B STRANGLER: live volá process_bar() (feature flag) ─────
+            # Default OFF → tento blok se přeskočí a běží dnešní rozhodování níže
+            # (detect_waves + send_order bloky se NEMAŽÍ — to je 2B-cleanup/2G).
+            # ON → rozhodování deleguje na engine.process_bar přes LiveEngineSession.
+            # Live-only kontrakt zůstává v orchestraci: forming-bar strip
+            # (_df_closed_bars_only výše), session pre-close cancel, cancel_expired_pending,
+            # guard/dedup (LiveExecutor), recovery (startup.py), TZ align (session_manager).
+            if bool(getattr(cfg, "live_use_process_bar", False)):
+                from runtime.live_engine_session import LiveEngineSession
+
+                # Cold start / reset každý cyklus nad aktuálním closed df; pak
+                # process_bar přes nové closed bary (catch-up = N× process_bar).
+                # MISSED_BARS_CATCH_UP už zalogován výše (new_bar_indices).
+                # TODO(2F): persistentní ctx + per-bar advance pro growing-df live
+                # cestu a reconciliation engine stavu vs MT5 (broker fills).
+                live_engine_session = LiveEngineSession(cfg, df)
+                live_engine_session.process_closed_bars(df, new_bar_indices)
+                _emit_live_periodic_logs()
+                continue
 
             waves = detect_waves(df, cfg)
             if not waves:
