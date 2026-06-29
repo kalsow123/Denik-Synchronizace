@@ -557,20 +557,18 @@ class BacktestEngine:
             raise ValueError("Prazdny DataFrame - zkontroluj CSV a date_from/date_to")
 
         from strategy.trend_bos import apply_tp_mode_to_waves
-        from strategy.wave_source import LegacyWaveSource, make_wave_source
+        from strategy.wave_source import IncrementalWaveSource, make_wave_source
 
-        # Zdroj vln (1B/1D): default LegacyWaveSource = obal nad
-        # run_pine_wave_simulation pres cache → bit-identicke s dnesnim engine.
+        # Zdroj vln (1B/1D/1F): default dle cfg.wave_detection_mode — LegacyWaveSource
+        # (precompute pres cache) nebo IncrementalWaveSource (O(n) advance per bar).
         if wave_source is None:
             wave_source = make_wave_source(df, cfg)
-        if not isinstance(wave_source, LegacyWaveSource):
-            # 1D: prepare() podporuje zatim jen precompute zdroj. IncrementalWaveSource
-            # (per-bar advance, reference pro live paritu) se zapoji az v 1F.
-            raise NotImplementedError(
-                "engine.prepare() zatim podporuje jen LegacyWaveSource "
-                "(legacy_precompute); incremental_causal se zapoji v akci 1F."
-            )
         self._wave_source = wave_source
+        if isinstance(wave_source, IncrementalWaveSource):
+            # O(n): jeden pruchod advance(1..n-1); stav drzeny inkrementalne
+            # (NE detect_waves(df[:i+1]) na kazdem baru).
+            for _i in range(1, len(df)):
+                wave_source.waves_at(_i)
         all_waves = wave_source.all_waves()
         wave_birth = wave_source.birth_map()
         ext_suppress_from = dict(wave_source.ext_counter_suppress_from_bar)

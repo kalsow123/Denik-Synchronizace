@@ -128,6 +128,14 @@ class IncrementalWaveSource(WaveSource):
     def all_waves(self) -> List[dict]:
         return list(self._det._all_waves)
 
+    @property
+    def ext_counter_suppress_from_bar(self) -> Dict[str, int]:
+        return dict(self._det.ext_counter_suppress_from_bar)
+
+    @property
+    def ext_forming_first_bar(self) -> Dict[str, int]:
+        return dict(self._det.ext_forming_first_bar)
+
 
 def make_wave_source(df: pd.DataFrame, cfg: BotConfig) -> WaveSource:
     """Vyber WaveSource podle `cfg.wave_detection_mode`."""
