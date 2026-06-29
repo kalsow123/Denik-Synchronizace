@@ -1,8 +1,35 @@
 # Konfigurace bota
 from dataclasses import dataclass, field
 
+
+def _ensure_mt5_patch_surface(mt5_mod) -> None:
+    """Doplni chybejici mt5 API pro CI stub — unittest.mock.patch vyzaduje existujici atributy."""
+    for name, value in (
+        ("POSITION_TYPE_BUY", 0),
+        ("POSITION_TYPE_SELL", 1),
+        ("TRADE_ACTION_REMOVE", 1),
+        ("TRADE_RETCODE_DONE", 10009),
+    ):
+        if not hasattr(mt5_mod, name):
+            setattr(mt5_mod, name, value)
+
+    def _noop(*_args, **_kwargs):
+        return None
+
+    for name in (
+        "symbol_info",
+        "symbol_info_tick",
+        "positions_get",
+        "orders_get",
+        "order_send",
+    ):
+        if not hasattr(mt5_mod, name):
+            setattr(mt5_mod, name, _noop)
+
+
 try:
     import MetaTrader5 as mt5
+    _ensure_mt5_patch_surface(mt5)
     _HAS_MT5 = True
 except ImportError:
     # MT5 neni potreba pro backtest - ten pracuje z CSV
@@ -16,6 +43,27 @@ except ImportError:
         TIMEFRAME_H4  = 16388
         TIMEFRAME_D1  = 16408
         TIMEFRAME_W1  = 32769
+
+        POSITION_TYPE_BUY = 0
+        POSITION_TYPE_SELL = 1
+        TRADE_ACTION_REMOVE = 1
+        TRADE_RETCODE_DONE = 10009
+
+        def symbol_info(self, *args, **kwargs):
+            return None
+
+        def symbol_info_tick(self, *args, **kwargs):
+            return None
+
+        def positions_get(self, *args, **kwargs):
+            return None
+
+        def orders_get(self, *args, **kwargs):
+            return None
+
+        def order_send(self, *args, **kwargs):
+            return None
+
     mt5 = _MT5Stub()
     _HAS_MT5 = False
 
