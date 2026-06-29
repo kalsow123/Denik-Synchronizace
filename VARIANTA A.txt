@@ -449,12 +449,44 @@ Cíl:
 
 3.7 Akce 1G — VOLITELNÉ PŘED SPOJENÍM (zmenší gap ~2,5k)
 --------------------------------------------------------
-  [ ] Exit timing BOS vs TP_WAVE_N — opravit v engine logice, NE v live_loop 2×
-  [ ] Session parita — session_enabled modelovat v backtestu stejně jako produkce
-  [ ] Potvrdit produkční config:
+  [x] Exit timing BOS vs TP_WAVE_N — config-gated v engine (default OFF = golden)
+  [x] Session parita — config-gated model pre-close cancel pendingů (default OFF)
+  [x] Potvrdit produkční config:
         live_study_two_sided_mirror_orders  (TS2 náhrada FIX #2)
         live_study_promoted_two_sided_as_wave
-  [ ] Dokumentovat rozdíl backtest vs produkce (session, spread)
+  [x] Dokumentovat rozdíl backtest vs produkce (session, spread)
+
+  Nové flagy (BotConfig, default OFF — legacy golden 164 / +39 041 beze změny):
+    backtest_tp_wave_before_bos_same_bar
+      False (default) = pořadí BOS → TP_WAVE_N jako dnes (§3.4 krok 2→5).
+      True            = na stejném baru s narozením W(N) nejdřív TP_WAVE_N, pak BOS.
+      Cíl: zúžit gap live vs engine u flip-follower / TP_WAVE_N exitů (fáze 2 A/B).
+    backtest_model_session_pre_close_cancel
+      False (default) = backtest nemaří session cancel (jako dnes).
+      True            = v okně [session_close − buffer, close) zruší všechny pendingy
+                        (parita `infra.orders.cancel_all_pendings` + live_loop pre-close).
+      Vyhodnocení: bar_time z CSV (M30 open); TZ = session_timezone z configu.
+
+  Produkční LIVE_BOT_CONFIG (resolve_live_execution_config):
+    live_study_two_sided_mirror_orders = True
+      Study B / varianta FIX #2: posílat TS2_ mirror ordery na MT5 (guard +
+      wave_counter_two_sided_orders). Engine simuluje counter; live posílá mirror.
+    live_study_promoted_two_sided_as_wave = True
+      Po BOS flipu promote TS2_ → W<wave_time> (wave_pnl slice, parita trackeru).
+      Spolu s mirror=True = produkční chování study B (wave_isolation_study=True).
+
+  Backtest vs produkce — známé rozdíly (design, ne bug fáze 1):
+    Session: live session_enabled=True → pre-close cancel, weekly break, mimo session
+             sleep; backtest default tyto kroky neprovádí (flag výše volitelný).
+    Spread:  backtest DEFAULT_BACKTEST_SPREAD (sim_params); live MT5 bid/ask + slippage.
+    Intrabar: backtest fill model (executor on_bar_open/range); live broker tick timing.
+    Forming bar: live zahazuje nedokončený bar z get_bars(); backtest jen closed OHLC.
+
+  Doporučení fáze 2 (mimo scope 1G implementace):
+    - Ověřit backtest_tp_wave_before_bos_same_bar=True na incremental referenci
+      a E2E replay; sjednotit live draw_right vs birth bar pro TP event (viz
+      runtime/wave_target_n_bar._event_bar).
+    - Session: případně model weekly break skip entries (live sleep) — samostatný flag.
 
   Agent: Gemini 3.1 pro
 
@@ -478,7 +510,7 @@ Cíl:
   [ ] 1D  process_bar() extrakce + BacktestExecutor
   [ ] 1E  TEST: legacy regrese == 1A baseline; executor protocol gap-check
   [ ] 1F  Zapsat incremental referenční PnL do sekce 6 + snapshot test
-  [ ] 1G  Exit timing + session (volitelně) + TEST
+  [x] 1G  Exit timing + session (volitelně) + TEST
   [ ] ——— START FÁZE 2 (sekce 5) ———
 
 
@@ -534,6 +566,8 @@ Cíl:
 
   CO PLÁN NEVYŘEŠÍ (design rozdíl, ne bug):
     - intrabar fill, spread/slippage, session gate, broker requote
+    - Viz §3.7 (1G): session pre-close cancel a spread — backtest default OFF /
+      fixed spread; live session_enabled + MT5 bid/ask
 
 
 ================================================================================

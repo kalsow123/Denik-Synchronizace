@@ -400,6 +400,8 @@ class BacktestEngine:
         self._executor: "Executor | None" = None
         # WaveSource pouzity v prepare() (default LegacyWaveSource) — viz wave_source.py.
         self._wave_source = None
+        # 1G: dny, kdy uz probehl modelovany session pre-close cancel (backtest).
+        self._session_pre_close_cancelled_dates: set = set()
 
     def prepare(
         self,
@@ -507,7 +509,9 @@ class BacktestEngine:
             "wf_activations": 0,
             "wf_skipped_ext": 0,
             "wf_classic_waves_resumed": 0,
+            "session_pre_close_pendings_cancelled": 0,
         }
+        self._session_pre_close_cancelled_dates = set()
         self._ext_active_waves = []
         self._ext_sl_anchor = None
         self._ext_secondary_sent = set()
@@ -655,6 +659,101 @@ class BacktestEngine:
         )
         return ctx
 
+    def _bar_has_tp_wave_n_birth(self, new_waves: list) -> bool:
+        """True pokud na tomto baru narozena vlna splnuje tp_target_wave_index (WAVE_TARGET_N)."""
+        if self._tp_mode not in WAVE_TARGET_N_FAMILY or not new_waves:
+            return False
+        if not self.wave_sequence_info:
+            return False
+        target_n = int(getattr(self.cfg, "tp_target_wave_index", 0) or 0)
+        if target_n <= 0:
+            return False
+        for wave in new_waves:
+            info = self.wave_sequence_info.get(str(wave.get("wave_time", "")))
+            if info is None or info.index_in_trend is None:
+                continue
+            if is_tp_wave_index(int(info.index_in_trend), target_n):
+                return True
+        return False
+
+    def _maybe_model_session_pre_close_cancel(
+        self,
+        bar_idx: int,
+        bar_time: datetime,
+        executor: "Executor",
+    ) -> None:
+        """
+        1G (config-gated): model live `cancel_all_pendings` v pre-close buffer okne.
+        Default OFF — legacy golden se nemeni.
+        """
+        if not bool(getattr(self.cfg, "backtest_model_session_pre_close_cancel", False)):
+            return
+        from infra.session_manager import is_pre_close_buffer, is_session_enabled
+
+        if not is_session_enabled(self.cfg):
+            return
+        if not is_pre_close_buffer(self.cfg, bar_time):
+            return
+        day_key = bar_time.date()
+        if day_key in self._session_pre_close_cancelled_dates:
+            return
+        self._session_pre_close_cancelled_dates.add(day_key)
+        cancelled = 0
+        for order in list(self.pending_orders):
+            executor.cancel_pending(order)
+            self._append_pending_vis(
+                "session_pre_close_cancelled", bar_idx, bar_time, order,
+            )
+            cancelled += 1
+        if cancelled:
+            self.wave_debug["session_pre_close_pendings_cancelled"] = (
+                self.wave_debug.get("session_pre_close_pendings_cancelled", 0)
+                + cancelled
+            )
+
+    def _run_tp_wave_events_on_bar(
+        self,
+        new_waves: list,
+        bar_idx: int,
+        bar_time: datetime,
+        close_: float,
+        high: float,
+        low: float,
+    ) -> None:
+        if self._tp_mode not in WAVE_TARGET_N_FAMILY or not new_waves:
+            return
+        for wave in new_waves:
+            self._on_wave_born_forming_tp_context(wave, bar_idx)
+        for wave in new_waves:
+            self._maybe_fire_tp_wave_event(
+                wave, bar_idx, bar_time, close_, high, low,
+            )
+
+    def _run_bos_exit_block(
+        self,
+        bar_idx: int,
+        bar_time: datetime,
+        close_: float,
+        high: float,
+        low: float,
+        protected_waves: set[str] | None,
+    ) -> None:
+        cfg = self.cfg
+        if not self.trend_states_per_bar:
+            return
+        close_pos = tp_mode_uses_bos_per_bar_exit(cfg)
+        pcm = self._pending_cancel_mode
+        cancel_pend = pcm == PendingCancelMode.TREND
+        if bos_flip_handler_should_run(
+            cfg, close_pos=close_pos, cancel_pend=cancel_pend,
+        ):
+            self._handle_bos_exit_on_bar(
+                bar_idx, bar_time, close_, high, low,
+                close_positions=close_pos,
+                cancel_pendings=cancel_pend,
+                protected_waves=protected_waves,
+            )
+
     def process_bar(self, i: int, ctx: "BarContext", executor: "Executor") -> None:
         """
         Zpracuje jeden bar `i` v poradi 1–8 (viz VARIANTA A.txt §3.4):
@@ -698,31 +797,27 @@ class BacktestEngine:
 
         self._update_forming_tp_watch_on_bar(high, low)
 
-        # 0) BOS_EXIT / BOS_EXIT_PRIORITY — BOS proti smeru pozic → zavreni na close baru
-        # pred standardni SL/TP kontrolou. Vracene flipped/flip_direction uz
-        # nepouzivame na deferred entry — retro-aktivace BOS-vlny bezi
-        # nezavisle pres `_bos_flip_wave_by_bar`.
-        # POZN: predavame i high/low, aby BOS-exit handler mohl respektovat
-        # SL — pokud bar prekonal SL pozice, zavreme na SL cene (ne na close),
-        # aby ztrata neprekrocila planovany SL (intra-bar by SL fired drive).
-        # close_positions: zavre pozice ve smeru staré trendovky na close baru
-        #                  (BOS_EXIT-like cleanup) — ridi tp_mode.
-        # cancel_pendings: zrusi pendingy ve smeru staré trendovky na BOS flipu —
-        #                  ridi tp_mode + pending_cancel_mode (TREND vynuti i v RRR_FIXED;
-        #                  NUMBER zrusi BOS-based cancel i v BOS_EXIT-like modes).
-        if self.trend_states_per_bar:
-            close_pos = tp_mode_uses_bos_per_bar_exit(cfg)
-            pcm = self._pending_cancel_mode
-            cancel_pend = pcm == PendingCancelMode.TREND
-            if bos_flip_handler_should_run(
-                cfg, close_pos=close_pos, cancel_pend=cancel_pend,
-            ):
-                self._handle_bos_exit_on_bar(
-                    i, bar_time, close_, high, low,
-                    close_positions=close_pos,
-                    cancel_pendings=cancel_pend,
-                    protected_waves=ctx.protected_waves_bar,
-                )
+        self._maybe_model_session_pre_close_cancel(i, bar_time, executor)
+
+        tp_before_bos = bool(
+            getattr(cfg, "backtest_tp_wave_before_bos_same_bar", False)
+        ) and self._bar_has_tp_wave_n_birth(new_waves)
+
+        # 0) BOS_EXIT / TP_WAVE_N: default BOS→TP (legacy golden); volitelne TP→BOS (1G).
+        if tp_before_bos:
+            self._run_tp_wave_events_on_bar(
+                new_waves, i, bar_time, close_, high, low,
+            )
+            self._run_bos_exit_block(
+                i, bar_time, close_, high, low, ctx.protected_waves_bar,
+            )
+        else:
+            self._run_bos_exit_block(
+                i, bar_time, close_, high, low, ctx.protected_waves_bar,
+            )
+            self._run_tp_wave_events_on_bar(
+                new_waves, i, bar_time, close_, high, low,
+            )
 
         # Position cap varianta 2: preventivne prune pendingy bez re-queue
         # (position-cap prune jde pres executor — gap-check).
@@ -746,17 +841,8 @@ class BacktestEngine:
 
         # 3) Nove signaly vznikajici na tomto baru
         # (new_waves uz nacteno na zacatku smycky)
-        # 3.a) TP-wave event (WAVE_TARGET_N): pred entry processingem
-        # AKTIVNE UZAVRE vsechny pozice ve smeru trendu (na bar_close)
-        # a polozi counter pending — beze vlivu na to, zda nove vlna projde
-        # filtry pro otevreni vstupu. high/low slouzi pro SL safety check.
-        if self._tp_mode in WAVE_TARGET_N_FAMILY and new_waves:
-            for wave in new_waves:
-                self._on_wave_born_forming_tp_context(wave, i)
-            for wave in new_waves:
-                self._maybe_fire_tp_wave_event(
-                    wave, i, bar_time, close_, high, low
-                )
+        # 3.a) TP-wave event (WAVE_TARGET_N): viz _run_tp_wave_events_on_bar
+        #      (volano pred/po BOS dle backtest_tp_wave_before_bos_same_bar).
         # 3.b) Bezne zpracovani nove vlny (entry pipeline) + volitelny
         # TWO-SIDED counter (doplnkovy WAVE na protivlni po doteku FIB rodice).
         for wave in new_waves:

@@ -218,6 +218,12 @@ class BotConfig:
     session_week_open_time: str = "01:05"
     session_close_positions_on_friday: bool = False
 
+    # ============== BACKTEST PARITY (1G, default OFF = legacy golden) ==============
+    # Na stejném baru: TP_WAVE_N před BOS exit (live gap ~2,5k; fáze 2 ověření).
+    backtest_tp_wave_before_bos_same_bar: bool = False
+    # Modelovat live session pre-close cancel_all_pendings v backtestu.
+    backtest_model_session_pre_close_cancel: bool = False
+
     def __post_init__(self) -> None:
         """Sjednoti novy a starsi alias pro BOS entry prepinac."""
         final = bool(self.bos_entry_enable) or bool(self.bos_reentry_enabled)
