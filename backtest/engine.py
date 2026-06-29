@@ -1881,6 +1881,19 @@ class BacktestEngine:
             }
         )
 
+    def _get_executor(self) -> "Executor":
+        """
+        Vrati executor (I/O hranice). `run()` vytvari cerstvy `BacktestExecutor`
+        per beh; tento lazy fallback obsluhuje PRIMA volani enginu (testy/utilitky)
+        bez `run()`/`prepare()`, kde `self._executor` jeste neexistuje. Parita
+        zustava — `BacktestExecutor` jen obaluje stejnou in-memory simulaci.
+        """
+        if self._executor is None:
+            from backtest.executor import BacktestExecutor
+
+            self._executor = BacktestExecutor(self)
+        return self._executor
+
     def _add_pending(self, wave: dict, order_type: str, ep: float, sl: float,
                      tp: float, lot: float, bar_idx: int, bar_time: datetime,
                      *, is_two_sided_mirror: bool = False):
@@ -1891,7 +1904,7 @@ class BacktestEngine:
         )
         # Order placement jde pres executor protokol (I/O hranice). §24 TS2 lot
         # mirror se sem dostane s lotem ze strategy/two_sided.py — viz gap-check.
-        self._executor.place_pending(po, bar_idx, bar_time)
+        self._get_executor().place_pending(po, bar_idx, bar_time)
 
     def _trigger_pending(self, bar_idx: int, bar_time: datetime,
                          high: float, low: float, open_: float):
