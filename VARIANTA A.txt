@@ -5,7 +5,7 @@ Repo:     Denik-Synchronizace (synchronizace)
 Datum:    2026-06-26 (aktualizace 2026-06-29)
 Účel:     Sjednocení live bota s backtesterem — jeden rozhodovací engine,
           live jen executor (MT5) + runtime obal (lock, session, telemetry).
-Status:   FÁZE 1 (Engine) — FÁZE 2 (Spojení) se doplní po dokončení fáze 1.
+Status:   FÁZE 1 (Engine) hotova (1C birth-parita ceka) — FÁZE 2 (Spojení) naplanovana.
 
 Referenční dokumenty:
   - Napojení live na backtest.txt   (handoff historická varianta C + plán)
@@ -504,12 +504,12 @@ Cíl:
 --------------------
   ZÁSADA: PO KAŽDÉ akci test + gate (viz sekce 0, TEST GATE).
 
-  [ ] 1A  Golden regrese: zamknout 164 / +39 041 USD
-  [ ] 1B  Inkrementální detektor (PineWaveDetector.advance — NOVÝ kód) + toggle
+  [x] 1A  Golden regrese: zamknout 164 / +39 041 USD
+  [x] 1B  Inkrementální detektor (PineWaveDetector.advance — NOVÝ kód) + toggle
   [ ] 1C  TEST: advance(i) birth == legacy birth; coupling incremental⇒causal
-  [ ] 1D  process_bar() extrakce + BacktestExecutor
-  [ ] 1E  TEST: legacy regrese == 1A baseline; executor protocol gap-check
-  [ ] 1F  Zapsat incremental referenční PnL do sekce 6 + snapshot test
+  [x] 1D  process_bar() extrakce + BacktestExecutor
+  [x] 1E  TEST: legacy regrese == 1A baseline; executor protocol gap-check
+  [x] 1F  Zapsat incremental referenční PnL do sekce 6 + snapshot test
   [x] 1G  Exit timing + session (volitelně) + TEST
   [ ] ——— START FÁZE 2 (sekce 5) ———
 
@@ -571,27 +571,448 @@ Cíl:
 
 
 ================================================================================
-5. FÁZE 2 — SPOJENÍ LIVE (akce 2A–2D + implementace)
+5. FÁZE 2 — SPOJENÍ LIVE (akce 2A–2G)
 ================================================================================
 
-  [ DOPLNIT PO DOKONČENÍ FÁZE 1 ]
+  POŘADÍ:  (1C doporučeno) → 2E → 2B → 2F → 2G  ;  2D paralelně po 2B  ;  2A volitelně později  ;  2C jen spike/dokumentace
+  PŘEDPOKLAD:  fáze 1 hotova (1A–1F commitnuto na varianta-a-faze-e); engine má
+               prepare/process_bar/run + Executor protokol (backtest/executor.py).
+  CÍL FÁZE:  live volá STEJNÝ process_bar() jako backtester; MT5 jen executor;
+             missed_bar_replay.py eliminován (catch-up = N× process_bar).
 
-  Architektonické varianty (volba TBD):
 
-    2A  BarProcessor + dual executor (čistá architektura, core/ + executors/)
-    2B  Strangler: live volá process_bar() z engine.py
-    2C  Engine + MT5 adapter (spike / mezikrok)
-    2D  + sjednocená datová vrstva (load_bars csv|mt5)
+5.0 ARCHITEKTURA — POROVNÁNÍ A DOPORUČENÍ
+------------------------------------------
 
-  Implementace (nezávisle na volbě 2A–2D):
-    - LiveExecutor (infra/orders → MT5)
-    - tenký runtime/live_loop.py
-    - smazat runtime/missed_bar_replay.py
-    - catch-up = N× process_bar()
+  Stav po fázi 1 (reálný kód):
+    backtest/engine.py       prepare(), process_bar(i,ctx,executor), run()
+    backtest/executor.py       BarContext, Executor ABC, BacktestExecutor
+                               (place_*, get_*, on_bar_open/range, prune/expire)
+    strategy/wave_source.py    LegacyWaveSource, IncrementalWaveSource
+    strategy/wave_detection_pine.py   PineWaveDetector.advance(i)
+    runtime/live_loop.py       ~2317 ř. — duplicitní rozhodování + send_order()
+    runtime/missed_bar_replay.py  ~555 ř. — duplicitní per-bar logika catch-up
 
-  Rozhodnutí: TBD
-  Vybraná varianta: _______________
-  Důvod volby: _______________
+  ┌──────┬──────────────────────────────────────────┬─────────────────────────┬─────────────────────────┬──────────────┬─────────────┐
+  │ Akce │ Co je                                    │ Plusy                   │ Mínusy                  │ Riziko parity│ Práce      │
+  ├──────┼──────────────────────────────────────────┼─────────────────────────┼─────────────────────────┼──────────────┼─────────────┤
+  │ 2A   │ BarProcessor v core/ + executors/        │ Čistá vrstva, engine    │ Velký přesun z          │ Střední      │ Velká       │
+  │      │ (process_bar mimo BacktestEngine)          │ tenký, testovatelný     │ engine.py (~3636 ř.);   │ (regrese     │ (refactor)  │
+  │      │                                          │ design §1.5             │ fáze 1 už má process_bar│ 1A/1E)       │             │
+  │      │                                          │                         │ NA enginu — zdvojení    │              │             │
+  ├──────┼──────────────────────────────────────────┼─────────────────────────┼─────────────────────────┼──────────────┼─────────────┤
+  │ 2B   │ Strangler: live volá                     │ Minimální diff; využije │ live_loop stále drží    │ Nízké        │ Střední     │
+  │      │ BacktestEngine.process_bar() +           │ hotový 1D protokol;     │ engine instanci + live  │ (decision    │ (hlavní     │
+  │      │ LiveExecutor                             │ rychlá cesta k paritě   │ obal (session, poll)    │ = engine)    │  cesta)     │
+  ├──────┼──────────────────────────────────────────┼─────────────────────────┼─────────────────────────┼──────────────┼─────────────┤
+  │ 2C   │ Engine + MT5 adapter (spike)             │ Rychlý POC „funguje     │ Varianta B ZAVŘENA      │ Vysoké       │ Malá        │
+  │      │ — tenký obal kolem send_order            │ na VPS"                 │ (§1.5); drift adapter vs│ (dva        │ (spike)     │
+  │      │                                          │                         │ process_bar; neudržitelné│ rozhodovače)│             │
+  ├──────┼──────────────────────────────────────────┼─────────────────────────┼─────────────────────────┼──────────────┼─────────────┤
+  │ 2D   │ Sjednocená datová vrstva                 │ Jedno API OHLC; méně    │ Neřeší rozhodování;     │ Nízké        │ Malá–       │
+  │      │ load_bars(source=csv|mt5)                │ duplicit TZ strip       │ MT5 jen na VPS/CI       │ (data hrana) │ střední     │
+  └──────┴──────────────────────────────────────────┴─────────────────────────┴─────────────────────────┴──────────────┴─────────────┘
+
+  Vybraná varianta:  2B (Strangler) + dual executor (LiveExecutor z 1D protokolu)
+  Důvod volby:
+    Fáze 1 už extrahovala process_bar() a Executor ABC na BacktestEngine —
+    strangler je přirozený další krok bez masivního přesunu do core/. Live drží
+    tenký obal (polling, session, recovery, telemetry); rozhodnutí jdou přes
+    engine.process_bar(i, ctx, LiveExecutor). 2A lze udělat později jako refactor
+    bez změny chování. 2C neodpovídá cíli „jeden rozhodovač". 2D je ortogonální
+    doplněk (paralelně po stabilním 2B), ne náhrada 2B.
+
+  POZNÁMKA: Finální volba architektury je na uživateli. Zbytek sekce 5 píše akce
+  pro doporučenou variantu 2B; u 2A/2C uvádíme odchylky.
+
+
+5.1 Akce 2A — BarProcessor + dual executor (core/ + executors/) [VOLITELNÉ]
+-----------------------------------------------------------------------------
+  Účel:  Dosáhnout cílové architektury §1.5 — process_bar mimo BacktestEngine,
+         sdílený BarProcessor, executors/BacktestExecutor + LiveExecutor.
+
+  Co udělat:
+    1. Nový modul core/bar_processor.py (nebo backtest/bar_processor.py):
+         - třída BarProcessor drží stav dnes na BacktestEngine (pending, open,
+           closed, trackery, EXT/PP/WF state, wave_debug)
+         - metoda process_bar(i, ctx, executor) = přesun z engine.py ř. ~757+
+    2. backtest/engine.py ztenčit:
+         - BacktestEngine = kontejner + prepare() + run() + vizualizace/report
+         - deleguje process_bar na BarProcessor
+    3. Složka executors/ (nebo ponechat backtest/executor.py + runtime/live_executor.py):
+         - executors/backtest.py  ← přesun BacktestExecutor
+         - executors/live.py      ← viz akce 2E
+    4. Importy v run_backtest.py, testech — beze změny chování.
+
+  Live-only kontrakt (NESMÍ se ztratit):
+    - Tato akce NEMĚNÍ live obal — jen reorganizuje engine. Live kontrakt řeší 2B–2G.
+
+  TEST (parita NA BACKTESTERU):
+    - Existující 1A golden + 1E legacy==1A + 1F incremental snapshot MUSÍ projít
+      beze změny čísel po pure refactoru.
+    - Nový test: BarProcessor.process_bar == BacktestEngine.process_bar (RecordingExecutor
+      na stejném df slice, stejné closed_trades count).
+
+  TEST GATE:  žádný NOVÝ fail vs scripts/_baseline_now.txt
+
+  Závislosti:  1D hotovo; doporučeno AŽ PO 2B+2G (stabilní live napojení)
+
+  Agent:  Opus 4.8  (1 agent — sdílí engine.py)
+
+  Riziko:  Střední — velký diff, snadno rozbije grid; mitigace = čistý refactor bez
+           logické změny + povinná 1A/1E regrese.
+
+  Odchylka pro 2B:  Přeskočit 2A; process_bar zůstane na BacktestEngine.
+
+
+5.2 Akce 2B — Strangler: live volá process_bar() [HLAVNÍ]
+---------------------------------------------------------
+  Účel:  Nahradit duplicitní rozhodování v live_loop.py + missed_bar_replay.py
+         jedním voláním BacktestEngine.process_bar() s IncrementalWaveSource.
+
+  Co udělat:
+    1. Nový modul runtime/live_engine_session.py (název orientační):
+         - třída LiveEngineSession(cfg):
+             * cfg = resolve_live_execution_config(cfg)
+             * engine = BacktestEngine(resolve_grid_engine_config(cfg))
+             * wave_source = IncrementalWaveSource(df, cfg)  (strategy/wave_source.py)
+             * ctx = engine.prepare(df, wave_source=wave_source)  — JEN při cold start
+               nebo resetu; mezi bary inkrementálně advance (viz bod 3)
+             * live_executor = LiveExecutor(cfg, sent_signals, ...)  — akce 2E
+         - metoda process_closed_bars(df_closed, bar_indices: list[int]):
+             for i in bar_indices:
+                 engine.process_bar(i, ctx, live_executor)
+         - metoda catch_up_missed(df_closed, last_processed_ts) -> int:
+             indices = new_closed_bar_indices(df_closed, last_processed_ts)
+             (přesunout z missed_bar_replay.py ř. ~101–111)
+             log MISSED_BARS_CATCH_UP; return len(indices)
+    2. Mapování stavu enginu vs dnešní live_loop:
+         - sent_signals: engine.sent_signals + MT5 guard (LiveExecutor)
+         - processed_tp_wave_times / forming_tp_watch: engine interní stav
+         - last_known_trend_dir / BOS flip: engine trend_states — NE duplicitní sety
+         - ext_runtime / wf_runtime: logika INSIDE process_bar (engine) — odstranit
+           paralelní ext_runtime.refresh_simulation z live_loop pro strategii
+         - ADX14 gate: entries_allowed před process_bar (live_loop), engine.respect
+           adx14_sim pokud zapnuto — ověřit paritu s dnešním adx14_runtime
+    3. Inkrementální vlny (NE detect_waves na celém df):
+         - Cold start / restart: prepare() s IncrementalWaveSource nebo replay
+           prepare od bar 0 přes process_bar 1..last (startup recovery — viz startup.py)
+         - Každý nový closed bar: IncrementalWaveSource.advance(i) doplní
+           ctx.waves_by_bar[i] PŘED process_bar(i) — nebo prepare jednou a
+           advance uvnitř WaveSource hook v prepare/process_bar (sjednotit s 1B API)
+    4. Odstranit z live_loop rozhodovací bloky (ř. ~1317–2500+):
+         - detect_waves(), compute_trend_states_*, BOS close/cancel logika,
+           send_order() pro WAVE/PP/counter/BOS/EXT/WF — vše nahradit session.process_bar
+    5. Ponechat v live_loop POUZE orchestraci (viz §1.5):
+         - get_bars → _df_closed_bars_only → catch_up → process_bar
+         - session_manager (is_in_session, pre-close cancel_all_pendings)
+         - cancel_expired_pending(cfg) před barem
+         - heartbeat, telemetry, instance_lock beze změny role
+
+  Live-only kontrakt (NESMÍ se ztratit):
+    - forming-bar strip: _df_closed_bars_only() (live_loop ř. ~401–405) PŘED engine
+    - dedup/guard: guard_live_send_order v LiveExecutor → infra/orders.send_order
+    - recovery: runtime/startup.py restore_pine_style_pending_orders — po refactoru
+      volá process_bar replay místo duplicitní simulace (apply_mt5_effects=False spike)
+    - TZ align: session_manager.get_broker_now / get_session_now; bar_time z df closed
+    - session: is_pre_close_buffer → cancel_all_pendings (infra/orders.py); mimo session sleep
+    - filling/retcode: infra/orders._order_send_with_retry, _resolve_retry_policy
+
+  TEST (parita NA BACKTESTERU, NE E2E):
+    1. tests/test_live_engine_decision_parity.py (nový):
+         - načti data/EURUSD_M30.csv, období 1F
+         - cfg incremental_causal + LIVE_BOT_CONFIG
+         - běh A: engine.run(df) s BacktestExecutor
+         - běh B: loop process_bar(1..n) s RecordingExecutor (spy)
+         - assert: stejné closed_trades (wave_time, reason, pnl) jako A
+    2. tests/test_live_catch_up_parity.py:
+         - simuluj 3 missed bary: process_bar po jednom vs batch — stejný výsledek
+         - bez missed_bar_replay importu
+    3. Live-only izolované (mock MT5):
+         - tests/test_live_engine_session_forming_bar.py — get_bars mock vrací
+           forming bar; assert process_bar neběží na forming indexu
+
+  TEST GATE:  nové testy zelené; žádný NOVÝ fail vs baseline
+
+  Závislosti:  2E (LiveExecutor skeleton); doporučeno 1C (birth-parita) před produkčním
+               live spojením; 1G flagy default OFF beze změny
+
+  Agent:  Opus 4.8  (1 agent — live_loop.py + nový session modul)
+
+  Riziko:  Střední — ADX14/EXT/WF edge cases; mitigace = incremental parity test +
+           postupné vypínání starých větví (feature flag live_use_process_bar=True)
+
+
+5.3 Akce 2C — Engine + MT5 adapter (spike / mezikrok) [NE DOPORUČENO]
+----------------------------------------------------------------------
+  Účel:  Rychlý POC: ověřit MT5 send_order pod jedním voláním bez full strangler.
+
+  Co udělat (jen pokud uživatel trvá na 2C místo 2B):
+    1. scripts/spike_2c_adapter.py — minimal loop: detect_waves + adapter mapující
+       signál → send_order (infra/orders.py); BEZ process_bar.
+    2. Dokumentovat proč nevyhovuje (drift vs engine, duplicita s live_loop).
+
+  Live-only kontrakt:  stejné jako dnes (guard, forming bar) — adapter jen volá send_order.
+
+  TEST:  žádný nový produkční kód; spike mimo pytest gate.
+
+  Závislosti:  žádné
+
+  Agent:  Composer 2.5  (throwaway spike)
+
+  Riziko:  Vysoké pro produkci — dvě rozhodovací větve; použít jen jako VPS smoke test.
+
+  Odchylka pro 2B:  Akci 2C PŘESKOČIT.
+
+
+5.4 Akce 2D — Sjednocená datová vrstva load_bars(csv|mt5)
+---------------------------------------------------------
+  Účel:  Jedno API pro OHLC — backtest i live; centralizovat forming-bar pravidlo u MT5.
+
+  Co udělat:
+    1. Nový modul core/market_data.py (nebo backtest/market_data.py):
+         def load_bars(cfg, *, source: Literal["csv","mt5"], n: int = 300,
+                       path: Path | None = None, include_forming: bool = False) -> pd.DataFrame
+         - source="csv": delegace na backtest/data_loader.load_csv + filter
+         - source="mt5": delegace na infra/market_data.get_bars(cfg, n)
+         - include_forming=False (default live): ořízni poslední řádek MT5 df
+           (logika z live_loop._df_closed_bars_only)
+         - TZ: normalizovat df["time"] na UTC nebo cfg.session_timezone (dokumentovat)
+    2. infra/market_data.get_bars — tenký wrapper volající load_bars(mt5) NEBO
+       ponechat a load_bars interně volá get_bars (minimální diff).
+    3. backtest/run_backtest.py — volitelně load_bars(csv) místo přímého load_csv
+       (beze změny výsledků).
+    4. runtime/live_loop.py — get_bars nahradit load_bars(mt5, include_forming=False).
+
+  Live-only kontrakt (NESMÍ se ztratit):
+    - forming bar: load_bars MT5 vždy strip unless include_forming=True (diag only)
+    - schema: time, open, high, low, close — shodné s §4.2
+
+  TEST (parita NA BACKTESTERU):
+    - tests/test_load_bars_csv_parity.py: load_bars(csv) == load_csv pro EURUSD_M30 slice
+    - tests/test_load_bars_mt5_forming_strip.py: mock MT5 rates; assert len closed == len-1
+
+  TEST GATE:  nové testy zelené; backtest baseline 1A/1F beze změny
+
+  Závislosti:  nezávislé na 2B; ideálně po 2B aby live_loop měl jedno místo dat
+
+  Agent:  Composer 2.5 / Gemini 3.1 pro
+
+  Riziko:  Nízké — izolovaná vrstva; MT5 testy mock (jako test_mt5_client skip na dev)
+
+
+5.5 Akce 2E — LiveExecutor (infra/orders → MT5)
+-------------------------------------------------
+  Účel:  Implementovat Executor ABC pro live — process_bar rozhoduje, LiveExecutor provádí.
+
+  Co udělat:
+    1. Nový soubor runtime/live_executor.py:
+         class LiveExecutor(Executor):
+           __init__(cfg, sent_signals, tracker_state?, apply_orders=True)
+    2. Mapování metod → infra/ (pass-through parametrů, BEZ změny rozhodnutí):
+         place_pending(order, bar_idx, bar_time):
+           - PendingOrder → wave dict / comment prefix (W_, PP_, CNTR_, TS2_, EXT_)
+           - volat infra/orders.send_order nebo specializované place_* pokud engine
+             předává typ (counter, pp, bos_reentry — gap-check 1E)
+           - PŘED send: infra/live_order_guard.block_duplicate_* + guard_live_send_order
+         place_market(trade, ...):
+           - _place_market_fallback / place_*_market v infra/orders.py
+         close_position(trade, reason, price, ...):
+           - _close_mt5_position_market / close_positions_by_direction dle reason
+           - BOS_EXIT, TP_WAVE_N, SL — stejné reason stringy jako engine
+         cancel_pending(order):
+           - MT5 order_delete podle ticket mapovaného z order.id / comment
+         modify_sltp(trade, sl=, tp=):
+           - MT5 TRADE_ACTION_SLTP; tp=None = clear (TS2 promote clear fixed TP)
+         close_partial / modify_lot:
+           - partial close API v infra/orders (pokud chybí — doplnit tenký wrapper)
+         get_open_positions / get_pendings:
+           - sync z MT5 nebo tracker_state (infra/state_sync.py) — read-only pro engine
+         on_bar_open / on_bar_range:
+           - LIVE: NO-OP (fill probíhá u brokera realtime); rozhodnutí už proběhla
+             v process_bar na close baru. Pro startup replay na historických datech
+             volitelně delegovat na BacktestExecutor chování (apply_mt5_effects=False).
+         prune_pendings / enforce_overflow / expire_pendings:
+           - cancel v MT5 dle engine výběru; expire → cancel_expired_pending(cfg)
+    3. Ticket / comment mapování:
+         - udržovat mapu wave_time → mt5_ticket pro cancel/modify (dnes v tracker_state)
+         - magic + comment parita s infra/orders._build_pending_request
+    4. apply_orders=False režim pro startup recovery replay (cold-start bez MT5 send).
+
+  Live-only kontrakt (NESMÍ se ztratit):
+    - guard_live_send_order (runtime/live_wave_isolation.py) — volat u každého send
+    - deduplicate_magic_pendings při startu cyklu (live_loop existující volání)
+    - filling mode IOC/RETURN, retcode retry — uvnitř infra/orders, NE v executoru
+    - wave_isolation study: classify_live_execution_mode filtr — executor respektuje
+      guard, ne mění engine routing
+
+  TEST (parita NA BACKTESTERU + live-only unit):
+    1. tests/test_live_executor_protocol.py:
+         - LiveExecutor implementuje všechny Executor abstraktní metody (inspect)
+         - stejný seznam jako test_executor_protocol.REQUIRED_EXECUTOR_METHODS
+    2. tests/test_live_executor_pass_through.py (mock send_order):
+         - place_pending s konstruovaným PendingOrder → assert send_order kwargs
+           (ep, sl, lot, comment) beze změny hodnot z order objektu
+    3. tests/test_live_executor_guard_blocks.py:
+         - mock guard_live_send_order return False → send_order se NEvolá
+    4. NEPOUŽÍVAT tests/test_mt5_client.py na dev bez MT5 (skip OK)
+
+  TEST GATE:  nové testy zelené; 1E executor gap-check stále zelený
+
+  Závislosti:  1D (Executor protokol); paralelně s 2D; PŘED 2B integrací
+
+  Agent:  Opus 4.8  (protokol + orders mapování)
+
+  Riziko:  Střední — TS2/EXT/PP různé place_* cesty; mitigace = 1E gap-check seznam +
+           mock testy per order typ
+
+
+5.6 Akce 2F — Tenký runtime/live_loop.py
+----------------------------------------
+  Účel:  live_loop = polling + session + IO; žádné strategické if/else.
+
+  Co udělat:
+    1. Cílová struktura run_live_loop() (~300–500 ř.):
+         while True:
+           sleep / session gate (infra/session_manager)
+           cancel_expired_pending(cfg)
+           df_raw = get_bars / load_bars(mt5)
+           df = closed bars only
+           if duplicate closed bar: heartbeat; continue
+           indices = catch_up indices
+           if pre_close: cancel_all_pendings; continue strategy? (session policy)
+           if not entries_allowed (adx14): process_bar s gate v engine
+           live_session.process_closed_bars(df, indices)
+           failed_signals replay (runtime/failed_signals_replay.py) — jen IO retry
+           tracker_state.sync_from_mt5()
+           periodic logs / telemetry
+    2. Odstranit / přesunout do live_engine_session:
+         - _place_live_bos_reentry, _place_live_counter_*, _maybe_fire_pp_break_event,
+           _attempt_live_bos_retro_entry, _apply_birth_bar_gate (decision → engine)
+         - import missed_bar_replay (odstranit v 2G)
+    3. Ponechat:
+         - _emit_live_periodic_logs, heartbeat, ADX14 runtime update (live-only)
+         - TradeTrackerState sync (infra/trade_tracker.py) — mimo process_bar
+         - main.py, instance_lock.py — beze změny role
+
+  Live-only kontrakt (NESMÍ se ztratit):
+    - 5s polling duplicita: last_processed_closed_bar_time (ř. ~966–967)
+    - session wake-up: was_outside_session → recovery trigger (main.py §startup)
+    - failed_signals dict — retry send, NE nové rozhodnutí
+    - jsonl / telemetry hooks
+
+  TEST (parita NA BACKTESTERU):
+    - tests/test_live_loop_no_strategy_imports.py (lint-style):
+         live_loop.py NESMÍ importovat send_order pro WAVE rozhodnutí po 2F
+         (povolen send_order jen v live_executor / failed_signals_replay)
+    - Decision parity: stejné testy jako 2B (live_loop není v backtest path)
+
+  TEST GATE:  žádný NOVÝ fail vs baseline
+
+  Závislosti:  2B + 2E hotové
+
+  Agent:  Opus 4.8  (1 agent — live_loop.py)
+
+  Riziko:  Střední — regrese live-only chování; mitigace = zachovat session testy
+           (tests/test_live_execution_modes.py, test_live_wave_isolation.py)
+
+
+5.7 Akce 2G — Smazat runtime/missed_bar_replay.py
+---------------------------------------------------
+  Účel:  Eliminovat duplicitní orchestrátor; catch-up = N× process_bar (§1.5).
+
+  Co udělat:
+    1. Ověřit, že live_loop neimportuje missed_bar_replay (grep clean).
+    2. Přesunout new_closed_bar_indices do runtime/live_engine_session.py nebo
+       core/trading_days.py (jedna funkce, ~15 ř.).
+    3. Smazat runtime/missed_bar_replay.py (~555 ř.).
+    4. Aktualizovat scripts/e2e_live_broker_sim.py — označit DEPRECATED / mimo plán
+       (NEPOUŽÍVAT pro gate; odstranění mimo scope fáze 2).
+    5. Grep repo na replay_missed_closed_bar — všechny reference pryč.
+
+  Live-only kontrakt:
+    - MISSED_BARS_CATCH_UP log event zachovat (live_engine_session.catch_up)
+    - replay_two_sided_tracker — logika už v engine process_bar (two_sided tracker)
+
+  TEST:
+    - tests/test_live_catch_up_parity.py (z 2B) musí projít bez missed_bar_replay
+    - grep test: assert žádný import missed_bar_replay v runtime/
+
+  TEST GATE:  žádný NOVÝ fail vs baseline
+
+  Závislosti:  2B + 2F dokončené
+
+  Agent:  Composer 2.5
+
+  Riziko:  Nízké — pokud 2B catch-up funguje
+
+
+5.8 MULTITASKING — VLNY A ZÁVISLOSTI (fáze 2)
+-----------------------------------------------
+
+  ┌─────────┬──────────────────────────────┬─────────────────────────────────────┐
+  │ Vlna    │ Spustit ZÁROVEŇ              │ Agent                               │
+  ├─────────┼──────────────────────────────┼─────────────────────────────────────┤
+  │ 0       │ 1C (pokud chybí)             │ Gemini 3.1 pro  (1 agent)           │
+  │ 1       │ 2E  +  2D                    │ Opus 4.8  +  Composer/Gemini        │
+  │ 2       │ jen 2B                       │ Opus 4.8  (1 agent)                 │
+  │ 3       │ 2F  →  pak 2G                │ Opus 4.8  →  Composer 2.5           │
+  │ 4       │ 2A (volitelně)               │ Opus 4.8  (1 agent)                 │
+  └─────────┴──────────────────────────────┴─────────────────────────────────────┘
+
+  ┌──────────────┬──────────────┬──────────────────────────────────────────────┐
+  │ Akce A       │ Akce B       │ Paralelně?  Důvod                           │
+  ├──────────────┼──────────────┼──────────────────────────────────────────────┤
+  │ 2E           │ 2D           │ ANO         jiné soubory (executor vs data)   │
+  │ 2E           │ 2B           │ NE          2B potřebuje LiveExecutor       │
+  │ 2B           │ 2F           │ NE          oba sahají do live_loop.py        │
+  │ 2B           │ 2G           │ NE          2G až po odstranění replay z loop│
+  │ 2F           │ 2G           │ NE          sekvenčně (2F pak 2G)             │
+  │ 2B/2F        │ 2A           │ NE          2A sahá do engine.py              │
+  │ 2B/2F/2G     │ jakýkoli jiný│ NE          sdílí runtime/live_loop.py        │
+  └──────────────┴──────────────┴──────────────────────────────────────────────┘
+
+  PRAVIDLO:  NIKDY 2 agenti současně do runtime/live_loop.py nebo backtest/engine.py.
+  POŘADÍ:  (1C) → 2E(∥2D) → 2B → 2F → 2G  →  volitelně 2A
+
+
+5.9 DEFINITION OF DONE + CHECKLIST FÁZE 2
+-----------------------------------------
+  Fáze 2 je HOTOVÁ když:
+
+  (a) Decision parity na backtesteru:
+        - incremental_causal process_bar loop == engine.run() (test 2B)
+        - legacy 1A/1E stále zelené (grid nesmí regress)
+  (b) Live execution = pass-through:
+        - LiveExecutor mapuje PendingOrder/OpenTrade → infra/orders bez změny parametrů
+  (c) runtime/missed_bar_replay.py SMAZÁN; catch-up = N× process_bar
+  (d) runtime/live_loop.py tenký (~orchestrace only); žádné duplicitní send_order WAVE
+  (e) Live-only unit testy zelené (forming bar, guard, executor protocol)
+  (f) TEST GATE: žádný NOVÝ fail vs scripts/_baseline_now.txt
+
+  Před live VPS deploy — nedořešené z fáze 1:
+    [ ] 1C  birth-parita (advance vs legacy birth bar) — doporučeno PŘED produkčním 2B
+    [x] 1G  flagy backtest_tp_wave_before_bos_same_bar / session model default OFF
+
+  MIMO SCOPE fáze 2 (neměnit očekávání):
+    - FIX #2 (engine mirror promoce)
+    - Telemetry GitHub sync
+    - E2E harness scripts/e2e_live_broker_sim.py (legacy varianta C — k odstranění později)
+    - Grid profily / rychlost research
+
+  CHECKLIST:
+  ZÁSADA: PO KAŽDÉ akci test + gate (viz sekce 0, TEST GATE).
+
+  [ ] 2E  LiveExecutor implementuje Executor → infra/orders pass-through
+  [ ] 2B  LiveEngineSession + live volá process_bar (IncrementalWaveSource)
+  [ ] 2F  Tenký live_loop (polling, session, telemetry only)
+  [ ] 2G  missed_bar_replay.py smazán; catch-up parity test
+  [ ] 2D  load_bars(csv|mt5) + forming-bar strip centralizován
+  [ ] —  TEST: decision parity incremental na CSV (2B testy)
+  [ ] —  TEST: live-only guard / forming-bar unit testy
+  [ ] —  TEST GATE čistý vs baseline
+  [ ] (volitelně) 2A  BarProcessor extrakce do core/
+  [ ] ——— FÁZE 2 HOTOVÁ ———
 
 
 ================================================================================
@@ -673,7 +1094,8 @@ Cíl:
               Nové číslování: FÁZE 1 (Engine) akce 1A–1G, FÁZE 2 (Spojení) 2A–2D.
               Přidána MAPA POJMŮ, sekce 0 PROMPT, multitasking tabulky, git větev.
               E2E vyřazeno z plánu. Test gate = žádný nový fail vs baseline.
-
+  2026-06-29  Sekce 5: podrobný plán fáze 2 (2A–2G, doporučení 2B+LiveExecutor,
+              multitasking, DoD checklist); sekce 3.9 zaškrtnutí 1A/1B/1D/1E/1F.
 
 ================================================================================
 EOF
