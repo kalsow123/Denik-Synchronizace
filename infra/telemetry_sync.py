@@ -107,6 +107,20 @@ def _terminate_process(pid: int) -> None:
         pass
 
 
+def _remove_stale_lock(lock_path: Path, keep_pid: int | None) -> None:
+    if not lock_path.is_file():
+        return
+    try:
+        lock_pid = int(lock_path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        lock_pid = -1
+    if lock_pid == keep_pid or not _pid_alive(lock_pid):
+        try:
+            lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def terminate_stale_sync_processes(root: Path, *, keep_pid: int | None = None) -> list[int]:
     """Ukonci osirele sync podprocesy pro tuto Denik instanci (po restartu bota)."""
     root_key = str(root.resolve()).lower()
@@ -165,17 +179,15 @@ def terminate_stale_sync_processes(root: Path, *, keep_pid: int | None = None) -
     except Exception:
         pass
 
-    lock_path = root / "locks" / "telemetry_sync.lock"
-    if lock_path.is_file():
-        try:
-            lock_pid = int(lock_path.read_text(encoding="ascii").strip())
-        except (OSError, ValueError):
-            lock_pid = -1
-        if lock_pid == keep_pid or not _pid_alive(lock_pid):
-            try:
-                lock_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+    _remove_stale_lock(root / "locks" / "telemetry_sync.lock", keep_pid)
+
+    env_path = root / ".env.sync"
+    if env_path.is_file():
+        env = _parse_env(_load_env_lines(env_path))
+        telemetry_repo = env.get("TELEMETRY_REPO_PATH", "").strip()
+        if telemetry_repo:
+            repo_lock = Path(telemetry_repo).resolve() / ".telemetry_sync.lock"
+            _remove_stale_lock(repo_lock, keep_pid)
 
     return terminated
 
