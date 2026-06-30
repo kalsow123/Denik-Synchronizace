@@ -831,6 +831,11 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
 
     closes = df["close"].astype(float).to_numpy()
 
+    # Perf: predpocitej mnozinu draw_right hodnot jednou (O(vln)). Set-membership
+    # (`in`) pouziva stejne hash/`==` jako puvodni `any(w.get("draw_right") == i ...)`,
+    # takze je semanticky (bit-)identicka, ale meni O(barov×vln) sken na O(barov).
+    draw_right_set = {w.get("draw_right") for w in waves}
+
     for i in range(n):
         bar_close = float(closes[i])
         
@@ -851,7 +856,7 @@ def compute_wave_sequence_info_per_wave(df: pd.DataFrame,
         # Mechanismus C: klasický swing BOS na baru bez vlny.
         # EXT-aware fib35 reverzace (Mech B) ma prednost — pokud na tomto baru
         # flipla, NEspoustime klasicky swing BOS opacnym smerem.
-        if not mech_b_fired and not any(w.get("draw_right") == i for w in waves):
+        if not mech_b_fired and i not in draw_right_set:
             if state.direction == "bull" and state.last_up_box_bottom is not None:
                 if bar_close < state.last_up_box_bottom:
                     if trend_established_by_ext:

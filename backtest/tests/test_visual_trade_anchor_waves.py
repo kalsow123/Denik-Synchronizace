@@ -1,7 +1,10 @@
 """Obchody bez wave boxu — supplement_visual_waves_for_trades doplní jen vizuál."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
+import pytest
 
 from backtest.engine import BacktestEngine
 from backtest.grid.backtest_conf import generate_combinations, get_profile
@@ -34,6 +37,11 @@ def _load_df(combo: dict) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
+@pytest.mark.skipif(
+    not Path("data/EURUSD_M30.csv").exists(),
+    reason="EURUSD M30 CSV not present",
+)
+@pytest.mark.slow
 def test_supplement_covers_all_non_bos_trades_with_visible_wave():
     combo = _testing_combo_bos_off()
     df = _load_df(combo)
