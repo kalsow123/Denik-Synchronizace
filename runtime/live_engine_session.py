@@ -2,15 +2,14 @@
 LiveEngineSession — strangler vrstva pro LIVE (VARIANTA A.txt §5.2, akce 2B).
 
 CÍL:
-  Nahradit duplicitní rozhodování v `runtime/live_loop.py` (+ `missed_bar_replay.py`)
+  Nahradit duplicitní rozhodování v `runtime/live_loop.py`
   JEDNÍM voláním `BacktestEngine.process_bar()` s `IncrementalWaveSource`. Live tím
   sdílí JEDEN rozhodovač s backtesterem → rozhodnutí se shodují Z KONSTRUKCE.
 
   Tato session DRŽÍ engine instanci + prepared `BarContext` + executor a poskytuje:
     - `process_closed_bars(df_closed, bar_indices)` — for i in indices: process_bar(i)
     - `catch_up_missed(df_closed, last_processed_ts)` — indexy nových closed barů
-      (logika přesunutá z `missed_bar_replay.new_closed_bar_indices`, BEZ importu
-      toho modulu — ten se maže až v akci 2G) + log MISSED_BARS_CATCH_UP.
+      (logika v `new_closed_bar_indices` níže) + log MISSED_BARS_CATCH_UP.
     - `closed_bars_only(df)` — forming-bar strip (live-only kontrakt; MT5 get_bars
       vrací i nedokončený bar).
 
@@ -81,10 +80,6 @@ def new_closed_bar_indices(
 ) -> List[int]:
     """
     Indexy uzavřených barů novějších než `last_processed`.
-
-    Náhrada za `runtime.missed_bar_replay.new_closed_bar_indices` (akce 2G smaže
-    původní modul). Logika 1:1 (missed_bar_replay ř. ~101–111) — bez importu
-    missed_bar_replay, aby catch-up cesta byla nezávislá.
     """
     out: List[int] = []
     for i in range(len(df)):
@@ -211,8 +206,8 @@ class LiveEngineSession:
         """
         Vrať indexy nových closed barů (> last_processed_ts) k zpracování.
 
-        Náhradní cesta za `missed_bar_replay` (akce 2G ho smaže). Když je >1 nový
-        bar (= výpadek / restart), zaloguje MISSED_BARS_CATCH_UP (parita s live_loop).
+        Catch-up = N× process_bar nad sdíleným ctx. Když je >1 nový bar (= výpadek /
+        restart), zaloguje MISSED_BARS_CATCH_UP (parita s live_loop).
         """
         indices = new_closed_bar_indices(df_closed, last_processed_ts)
         if len(indices) > 1:

@@ -1,7 +1,7 @@
 """
 Jednotný WAVE_TARGET_N / G cyklus na jeden closed bar — parita live ↔ backtest.
 
-Používá live_loop i missed_bar_replay (catch-up po výpadku).
+Používá live_loop (catch-up po výpadku = LiveEngineSession.process_bar).
 """
 from __future__ import annotations
 

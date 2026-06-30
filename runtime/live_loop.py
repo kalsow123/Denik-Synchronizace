@@ -34,9 +34,7 @@ from infra.orders import (
     enforce_counter_positions_min_sl,
     get_pp_pending_wave_times,
     get_active_counter_wave_times,
-    place_bos_reentry_market,
     place_counter_position_pending,
-    place_counter_position_market,
     place_pp_market_fallback,
     place_pp_pending,
 )
@@ -78,17 +76,12 @@ from strategy.wave_sequence import (
     compute_wave_2_no_tp_protected_waves,
     compute_wave_target_tp_price,
     compute_wave_counter_take_profit,
-    compute_wave_counter_sl_setup,
     find_wave_by_time,
     is_tp_wave_index,
     wave_counter_min_sl_pct,
 )
 from strategy.wave_target_n_mode import is_wave_target_n_family, is_wave_target_n_g
-from strategy.wave_target_n_early import (
-    FormingTpWatch,
-    g_counter_wave_time,
-    wave_counter_entry_allowed,
-)
+from strategy.wave_target_n_early import FormingTpWatch
 from strategy.two_sided import (
     TwoSidedTracker,
     find_parent_wave_for_two_sided,
@@ -213,7 +206,7 @@ def _apply_birth_bar_gate(
 
     BOS retro vlny (wave_against_trend cekajici na flip) se pred flip barem
     neoznacuji jako permanently missed — parita s engine `_bos_flip_wave_by_bar`.
-    Vstup z retro probehne v `_attempt_live_bos_retro_entry` na flip baru.
+    Retro vstup resi BacktestEngine.process_bar (LiveEngineSession).
     Startup recovery / MT5 pending sync birth_bar gate neobchazi — tam se send_order nevolá.
     """
     birth = _wave_birth_bar_index(wave_time, wave_birth_by_time)
@@ -394,95 +387,6 @@ def _maybe_fire_pp_break_event(*, cfg: BotConfig, df, waves,
     processed_pp_wave_times.add(wave_time_str)
 
 
-def _place_live_bos_reentry(*, cfg: BotConfig, new_trend_dir: str,
-                            broken_trend_dir: str, bar_trend_states,
-                            waves, entries_allowed: bool = True) -> None:
-    """
-    LIVE ekvivalent backtest engine `_place_bos_reentry_market`.
-
-    SL = ladder z velikosti POSLEDNI vlny rozbiteho smeru (bar_trend_states[-2]
-    pred BOS flipem). Lot = calc_lot(actual_entry, sl_price, cfg). Entry = aktualni
-    ASK (BUY) / BID (SELL) z mt5.symbol_info_tick.
-    """
-    if not bar_trend_states:
-        return
-    if not entries_allowed:
-        _log_adx14_entry_blocked(cfg, entry_type="BOS_REENTRY")
-        return
-    new_dir = 1 if new_trend_dir == "bull" else -1
-
-    # Predchozi stav (pred flipem): hledame zpetne, dokud najdeme bar s
-    # broken_trend_dir (cca [-2], pripadne [-3] kdyby byl flip vice baru).
-    broken_wave_time = None
-    for state in reversed(bar_trend_states[:-1]):
-        if state.direction == broken_trend_dir:
-            if broken_trend_dir == "bull":
-                broken_wave_time = getattr(state, "last_up_wave_time", None)
-            else:
-                broken_wave_time = getattr(state, "last_down_wave_time", None)
-            break
-    if not broken_wave_time:
-        log.warning(
-            "BOS re-entry: nepodarilo se zjistit posledni vlnu rozbiteho smeru — preskakuji"
-        )
-        return
-
-    broken_wave = next((w for w in waves if w["wave_time"] == broken_wave_time), None)
-    if broken_wave is None:
-        log.warning("BOS re-entry: rozbita vlna nenalezena v `waves` — preskakuji")
-        return
-
-    tick = mt5.symbol_info_tick(cfg.symbol)
-    if tick is None:
-        log.warning("BOS re-entry: nelze ziskat tick — preskakuji")
-        return
-    is_buy = (new_dir == 1)
-    entry_price = float(tick.ask if is_buy else tick.bid)
-    wave_size_pct = float(broken_wave.get("move_pct", 0.0))
-    sl_pct, sl_price = compute_ladder_sl_from_wave_size(
-        entry_price, wave_size_pct, cfg, is_buy=is_buy
-    )
-    if sl_pct <= 0.0:
-        log.warning(f"BOS re-entry: sl_pct={sl_pct} <= 0 — preskakuji")
-        return
-
-    lot = calc_lot(entry_price, sl_price, cfg)
-    if lot <= 0.0:
-        log.warning(f"BOS re-entry: lot={lot} <= 0 — preskakuji")
-        return
-
-    synth_signal = dict(broken_wave)
-    synth_signal["dir"] = new_dir
-    synth_signal.pop("wave_target_tp_price", None)
-    tp = resolve_effective_tp(cfg, synth_signal, entry_price, sl_price, is_buy=is_buy)
-
-    info = mt5.symbol_info(cfg.symbol)
-    digits = int(getattr(info, "digits", 5)) if info else 5
-
-    log_event(
-        cfg, "info", "BOS_REENTRY_TRIGGERED",
-        new_trend=new_trend_dir,
-        broken_trend=broken_trend_dir,
-        broken_wave_time=str(broken_wave_time),
-        wave_size_pct=float(wave_size_pct),
-        sl_pct=float(sl_pct),
-        entry=float(entry_price),
-        sl=float(sl_price),
-        lot=float(lot),
-        tp=(None if tp is None else float(tp)),
-    )
-    place_bos_reentry_market(
-        cfg,
-        new_trend_dir=new_dir,
-        entry_price=entry_price,
-        sl_price=sl_price,
-        lot=lot,
-        digits=digits,
-        broken_wave_time=str(broken_wave_time),
-        tp_price=(None if tp is None else float(tp)),
-    )
-
-
 def _place_live_counter_position(*, cfg: BotConfig, wave: dict, info,
                                   trend_dir: int, tp_price: float,
                                   all_waves, entries_allowed: bool = True) -> None:
@@ -550,83 +454,6 @@ def _place_live_counter_position(*, cfg: BotConfig, wave: dict, info,
         digits=digits,
         tp=(None if counter_tp is None else float(counter_tp)),
     )
-
-
-def _g_extension_hit_closed_positions(ext_stats: dict) -> bool:
-    """Backtest parita: counter z G jen kdyz extension hit neco zavrel (TP nebo SL)."""
-    return (
-        int(ext_stats.get("trend_dir_closed", 0)) > 0
-        or int(ext_stats.get("wave_counter_closed", 0)) > 0
-        or int(ext_stats.get("two_sided_closed", 0)) > 0
-        or int(ext_stats.get("sl_protected", 0)) > 0
-    )
-
-
-def _place_live_counter_from_g_extension(
-    *,
-    cfg: BotConfig,
-    watch: FormingTpWatch,
-    entries_allowed: bool = True,
-) -> None:
-    """G varianta: MARKET counter na armed_tp ve stejnem cyklu jako TP_EXTENSION_HIT."""
-    if watch.counter_placed:
-        return
-    if not wave_counter_entry_allowed(cfg):
-        return
-    if watch.armed_tp is None:
-        return
-    if not entries_allowed:
-        _log_adx14_entry_blocked(cfg, entry_type="COUNTER_POSITION")
-        return
-
-    prev_wave = watch.prev_wave
-    tp_price = float(watch.armed_tp)
-    setup = compute_wave_counter_sl_setup(
-        cfg,
-        trend_dir=int(watch.trend_dir),
-        tp_price=tp_price,
-        prev_wave=prev_wave,
-    )
-    if setup is None:
-        return
-    counter_dir, sl_pct, counter_sl, counter_tp = setup
-    lot = calc_lot(tp_price, counter_sl, cfg)
-    if lot <= 0.0:
-        return
-
-    wave_time_key = g_counter_wave_time(watch)
-    info_symbol = mt5.symbol_info(cfg.symbol)
-    digits = int(getattr(info_symbol, "digits", 5)) if info_symbol else 5
-
-    log_event(
-        cfg,
-        "info",
-        "COUNTER_G_EXTENSION_TRIGGERED",
-        wave_time_key=str(wave_time_key),
-        prev_wave_time=str(prev_wave.get("wave_time", "")),
-        target_tp_index=int(watch.target_tp_index),
-        sl_pct=float(sl_pct),
-        counter_dir=int(counter_dir),
-        armed_tp=float(tp_price),
-        counter_sl=float(counter_sl),
-        lot=float(lot),
-    )
-    ok = place_counter_position_market(
-        cfg,
-        wave_time=str(wave_time_key),
-        counter_dir=int(counter_dir),
-        counter_sl=float(counter_sl),
-        lot=float(lot),
-        digits=digits,
-        tp=(None if counter_tp is None else float(counter_tp)),
-        reference_ep=float(tp_price),
-    )
-    if ok:
-        watch.counter_placed = True
-        watch.counter_wave_time_key = str(wave_time_key)
-        enforce_counter_positions_min_sl(
-            cfg, min_sl_pct=wave_counter_min_sl_pct(cfg),
-        )
 
 
 def _try_live_counter_only_on_wave(
@@ -1151,8 +978,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
             # Live-only kontrakt zůstává mimo process_bar: forming-bar strip (load_bars
             # include_forming=False), session pre-close cancel, cancel_expired_pending,
             # guard/dedup (LiveExecutor), recovery (startup.py), TZ align (session_manager).
-            # Catch-up indexy + MISSED_BARS_CATCH_UP log = LiveEngineSession.catch_up_missed
-            # (BEZ runtime.missed_bar_replay — ten se maže v 2G).
+            # Catch-up indexy + MISSED_BARS_CATCH_UP log = LiveEngineSession.catch_up_missed.
             from runtime.live_engine_session import LiveEngineSession
 
             live_engine_session = LiveEngineSession(cfg, df)

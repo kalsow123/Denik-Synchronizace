@@ -1,4 +1,8 @@
 """
+DEPRECATED (akce 2G): Tento skript importoval runtime.missed_bar_replay (smazán).
+Catch-up / live rozhodování = LiveEngineSession.catch_up_missed + N× process_bar.
+Nepoužívat pro gate / CI — skript neběží bez missed_bar_replay.
+
 END-TO-END verifikace: ziva smycka (replay_missed_closed_bar) proti FAKE MT5
 brokeru pres historicke CSV. Cil: zmerit, zda LIVE plumbing (placement + BOS /
 WAVE_TARGET_N / G-extension exity) da stejne WAVE PnL/DDi jako backtest engine.

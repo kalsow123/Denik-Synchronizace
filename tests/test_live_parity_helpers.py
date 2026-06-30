@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from infra.orders import decision_prices_from_bar_close
-from runtime.missed_bar_replay import new_closed_bar_indices
+from runtime.live_engine_session import new_closed_bar_indices
 
 
 def test_decision_prices_from_bar_close_uses_half_spread():
