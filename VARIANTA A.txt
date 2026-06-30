@@ -1029,16 +1029,33 @@ Cíl:
   CHECKLIST:
   ZÁSADA: PO KAŽDÉ akci test + gate (viz sekce 0, TEST GATE).
 
-  [ ] 2E  LiveExecutor implementuje Executor → infra/orders pass-through
-  [ ] 2B  LiveEngineSession + live volá process_bar (IncrementalWaveSource)
-  [ ] 2F  Tenký live_loop (polling, session, telemetry only)
-  [ ] 2G  missed_bar_replay.py smazán; catch-up parity test
-  [ ] 2D  load_bars(csv|mt5) + forming-bar strip centralizován
-  [ ] —  TEST: decision parity incremental na CSV (2B testy)
-  [ ] —  TEST: live-only guard / forming-bar unit testy
-  [ ] —  TEST GATE čistý vs baseline
-  [ ] (volitelně) 2A  BarProcessor extrakce do core/
+  [x] 2E  LiveExecutor implementuje Executor → infra/orders pass-through      (commit 74a297c)
+  [x] 2B  LiveEngineSession + live volá process_bar (IncrementalWaveSource)   (commit ff81dec)
+  [x] 2F  Tenký live_loop (polling, session, telemetry only)                  (commit 8655b80)
+  [ ] 2G  missed_bar_replay.py smazán; catch-up parity test                   (Composer 2.5, po 2D)
+  [~] 2D  load_bars(csv|mt5) + forming-bar strip centralizován               (load_bars commit 568b38f; run_backtest wiring v 2D-finish)
+  [x] —  TEST: decision parity incremental na CSV (2B testy)                  (test_live_engine_decision_parity / test_live_catch_up_parity)
+  [x] —  TEST: live-only guard / forming-bar unit testy                       (executor protocol / guard / forming-bar — zelené)
+  [ ] —  TEST GATE čistý vs baseline                                          (plný gate -m "not slow" v 2D-finish)
+  [x] (volitelně) 2A  BarProcessor extrakce do core/                          (commit cbabadc)
   [ ] ——— FÁZE 2 HOTOVÁ ———
+
+  ──────────────────────────────────────────────────────────────────────────
+  PROTOKOL PROVEDENÍ FINÁLNÍ DoD VERIFIKACE (poslední krok fáze 2)
+  ──────────────────────────────────────────────────────────────────────────
+  POŘADÍ (závazné):
+    1) Nejdřív 2D-finish + 2G HOTOVÉ a ZELENÉ; vše opravené, vše funguje.
+    2) Commit + push čistého stavu.
+    3) TEPRVE PAK spustit finální DoD verifikaci proti checklistu (a)–(f) výše.
+  ROZDĚLENÍ MODELŮ:
+    - Testy / gate  = Composer 2.5  (API limity v pohodě → sem patří dlouhé běhy).
+    - Nutné úpravy  = Opus 4.8.  Po každé úpravě ZNOVU otestovat (Composer).
+  ZÁCHRANA API:
+    - Když se Opus 4.8 zasekne / běží v loopu → OKAMŽITĚ vypnout, ať nežere API.
+  COMMIT POLITIKA TOHOTO FINÁLNÍHO TASKU:
+    - Případné opravy vzešlé z finální DoD verifikace se NEcommitují a NEpushují
+      (necháváme je lokálně k revizi uživatelem).
+  OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
 
 
 ================================================================================
@@ -1122,6 +1139,10 @@ Cíl:
               E2E vyřazeno z plánu. Test gate = žádný nový fail vs baseline.
   2026-06-29  Sekce 5: podrobný plán fáze 2 (2A–2G, doporučení 2B+LiveExecutor,
               multitasking, DoD checklist); sekce 3.9 zaškrtnutí 1A/1B/1D/1E/1F.
+  2026-06-30  Sekce 5.9: checklist aktualizován (2A/2B/2E/2F hotové, 2D částečně,
+              2G + plný gate zbývají) + PROTOKOL finální DoD verifikace
+              (Composer=testy / Opus 4.8=úpravy, kill Opus při loopu,
+              fixy z finálního tasku NEcommitovat/NEpushovat, vždy 2leté okno).
 
 ================================================================================
 EOF
