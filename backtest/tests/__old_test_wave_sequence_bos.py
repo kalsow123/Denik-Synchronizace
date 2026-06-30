@@ -39,7 +39,7 @@ def test_ext_post_trend_seed_resets_index_in_trend():
     a predchozi opacna vlna index=1 (retroaktivne) po T4 uprave.
     """
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-05") & (df["time"] <= "2026-03-10 23:59:59")].reset_index(
         drop=True
@@ -67,7 +67,7 @@ def test_ext_post_trend_seed_resets_index_in_trend():
 def test_wave_sequence_index_matches_trend_snapshot_after_ext():
     """Trend-dir vlny po seed-wave musi rust v lock zone stejne jako BOS snapshot."""
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-22") & (df["time"] <= "2026-03-31")].reset_index(
         drop=True

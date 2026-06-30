@@ -18,7 +18,7 @@ def _cfg():
 
 @pytest.fixture
 def full_may_df():
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     return df[(df["time"] >= "2025-05-10") & (df["time"] <= "2025-06-05")].reset_index(

@@ -16,10 +16,10 @@ from backtest.output_paths import (
 
 
 def test_symbol_from_profile_maps_to_folder_name():
-    """bot_optimalisation má EURUSD.x → složka EURUSD."""
+    """bot_optimalisation má EURUSD → složka EURUSD."""
     combos = generate_combinations(get_profile("bot_optimalisation"))
     assert combos, "profil musí mít alespoň jednu kombinaci"
-    assert combos[0]["symbol"] == "EURUSD.x"
+    assert combos[0]["symbol"] == "EURUSD"
     assert grid_output_symbol(combos) == "EURUSD"
     assert symbol_folder_name(combos[0]["symbol"]) == "EURUSD"
 

@@ -10,7 +10,7 @@ from backtest.grid.translator import grid_dict_to_bot_config
 
 def test_ext1_down_wave2_down_ends_ext_no_bull_idx_before_bos():
     cfg = grid_dict_to_bot_config(generate_combinations(get_profile("testing"))[0])
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2025-04-21") & (df["time"] <= "2025-04-23")].reset_index(

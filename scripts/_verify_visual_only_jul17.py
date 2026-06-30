@@ -48,7 +48,7 @@ def _wave_runtime_sig(w: dict) -> tuple:
 
 def main() -> None:
     cfg = _combo()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[

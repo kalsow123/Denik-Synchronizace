@@ -18,13 +18,13 @@ from backtest.output_paths import (
 
 
 def test_safe_path_part():
-    assert safe_path_part("EURUSD.x") == "EURUSD.x"
+    assert safe_path_part("EURUSD") == "EURUSD"
     assert safe_path_part("a b/c") == "a_b_c"
 
 
 def test_symbol_folder_name_strips_liquidity_suffix():
     assert symbol_folder_name("USDCAD.x") == "USDCAD"
-    assert symbol_folder_name("EURUSD.r") == "EURUSD"
+    assert symbol_folder_name("EURUSD") == "EURUSD"
     assert symbol_folder_name("GER40.cash") == "GER40"
     assert symbol_folder_name("EU50p") == "EU50p"
 
@@ -51,7 +51,7 @@ def test_next_daily_output_dir_increment(tmp_path: Path):
 def test_live_match_output_dir_is_symbol_folder(tmp_path: Path):
     out = live_match_output_dir(
         tmp_path / "results",
-        "EURUSD.x",
+        "EURUSD",
         config_name="LIVE_BOT_CONFIG",
         timeframe_label="M30",
         date_from="2025-11-10",
@@ -73,7 +73,7 @@ def test_live_match_output_dir_is_symbol_folder(tmp_path: Path):
 
 def test_grid_mixed_labels():
     combos = [
-        {"symbol": "EURUSD.x", "timeframe": "M15"},
+        {"symbol": "EURUSD", "timeframe": "M15"},
         {"symbol": "GBPUSD.x", "timeframe": "H1"},
     ]
     assert grid_output_symbol(combos) == "MIXED"

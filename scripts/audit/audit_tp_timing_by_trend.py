@@ -11,7 +11,7 @@ Buckety: BRZY / VCAS / POZDE / NEUTRAL (+ G_FALLBACK u wave_target_n_g)
 
 Usage:
   python scripts/audit/audit_tp_timing_by_trend.py
-  python scripts/audit/audit_tp_timing_by_trend.py --csv data/EURUSD.x_M30.csv \\
+  python scripts/audit/audit_tp_timing_by_trend.py --csv data/EURUSD_M30.csv \\
       --date-from 2026-03-03 --date-to 2026-05-10 \\
       --output results/audit_tp_timing
 """
@@ -58,7 +58,7 @@ def _example_cfg(*, tp_mode: str = "wave_target_n") -> Any:
             "rrr": 2.0,
             "fib_level": 0.5,
             "entry_mode": "market_fallback",
-            "symbol": "EURUSD.x",
+            "symbol": "EURUSD",
             "sl_fib_level": 0.8,
             "abort_fib_level": "shift_sl",
             "wave_plus": True,
@@ -559,7 +559,7 @@ th {{ background: #f0f0f0; }}
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="TP timing audit po BOS trendech")
-    parser.add_argument("--csv", type=Path, default=ROOT / "data" / "EURUSD.x_M30.csv")
+    parser.add_argument("--csv", type=Path, default=ROOT / "data" / "EURUSD_M30.csv")
     parser.add_argument("--date-from", default="2026-03-03")
     parser.add_argument("--date-to", default="2026-05-10")
     parser.add_argument(

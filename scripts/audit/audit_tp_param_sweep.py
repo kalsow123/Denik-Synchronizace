@@ -42,7 +42,7 @@ def _example_grid_dict(
         "rrr": 2.0,
         "fib_level": 0.5,
         "entry_mode": "market_fallback",
-        "symbol": "EURUSD.x",
+        "symbol": "EURUSD",
         "sl_fib_level": 0.8,
         "abort_fib_level": "shift_sl",
         "wave_plus": True,
@@ -177,7 +177,7 @@ def _timing_score(row: dict, *, mode: str) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sweep TP parametrů (timing + backtest)")
-    parser.add_argument("--csv", type=Path, default=ROOT / "data" / "EURUSD.x_M30.csv")
+    parser.add_argument("--csv", type=Path, default=ROOT / "data" / "EURUSD_M30.csv")
     parser.add_argument("--date-from", default="2026-03-03")
     parser.add_argument("--date-to", default="2026-05-10")
     parser.add_argument(

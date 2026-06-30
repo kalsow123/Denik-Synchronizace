@@ -34,7 +34,7 @@ def main() -> None:
     )
     cfg = grid_dict_to_bot_config(combo)
     print("combo two_sided=", combo.get("wave_counter_two_sided_enabled"), flush=True)
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2025-05-10") & (df["time"] <= "2025-05-26")].reset_index(

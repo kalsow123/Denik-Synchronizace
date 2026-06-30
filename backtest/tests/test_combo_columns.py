@@ -25,7 +25,7 @@ def test_file_prefix_matches_combo_no():
 
 
 def test_visual_waves_stem_includes_tp_mode_after_combo_no():
-    bot = "M30_w0.26_o3_r2.0_f0.5_mkt_symbolEURUSD.x_sf0.8_afxshift_sl_wpTrue_exp3"
+    bot = "M30_w0.26_o3_r2.0_f0.5_mkt_symbolEURUSD_sf0.8_afxshift_sl_wpTrue_exp3"
     stem = visual_waves_export_stem(bot, tp_mode="bos_exit", test_pozice=16)
     assert stem.startswith("00016_bos_exit_")
     assert "4598d7855c959d" not in stem

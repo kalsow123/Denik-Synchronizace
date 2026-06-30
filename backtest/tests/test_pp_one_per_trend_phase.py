@@ -9,7 +9,7 @@ from backtest.engine import BacktestEngine
 
 def _cfg() -> BotConfig:
     return BotConfig(
-        symbol="EURUSD.x",
+        symbol="EURUSD",
         timeframe=30,
         wave_min_pct=0.26,
         min_opp_bars=3,
@@ -26,7 +26,7 @@ def _cfg() -> BotConfig:
 def test_mar6_at_most_one_pp_while_bear_trend_continues():
     """6. 3. 2026: drive 2× PP ve stejne bear fazi (15:00 + 15:30); ma byt max 1."""
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2026-03-04") & (df["time"] <= "2026-03-07")].reset_index(

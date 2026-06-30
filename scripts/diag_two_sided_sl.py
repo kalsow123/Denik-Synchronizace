@@ -20,11 +20,11 @@ def main() -> None:
     }
     row["bot_name"] = "DIAG"
     row["tp_mode"] = "bos_exit"
-    row["symbol"] = "EURUSD.x"
+    row["symbol"] = "EURUSD"
     row["timeframe"] = "M30"
     cfg = grid_dict_to_bot_config(row)
 
-    df = load_csv("data/EURUSD.x_M30.csv")
+    df = load_csv("data/EURUSD_M30.csv")
     df = filter_by_date_range(df, "2026-03-17", "2026-03-22")
     eng = BacktestEngine(cfg)
     trades = eng.run(df, retain_wave_snapshot=True)

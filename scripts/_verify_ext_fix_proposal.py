@@ -21,7 +21,7 @@ def _cfg():
 
 def _run(label, t0, t1, watch):
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= t0) & (df["time"] <= t1)].reset_index(drop=True)

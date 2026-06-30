@@ -26,7 +26,7 @@ from strategy.wave_detection import detect_waves
 
 
 def _load_df():
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     return df[

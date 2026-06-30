@@ -199,7 +199,7 @@ def test_eurusd_mar2026_weekend_merges_to_one_ext_down():
         trend_filter_enabled=True,
         trend_hh_hl_filter_enabled=True,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-05") & (df["time"] <= "2026-03-11")].reset_index(
         drop=True
@@ -228,7 +228,7 @@ def test_gap_merge_does_not_collapse_three_month_trend():
     from strategy.wave_detection import detect_waves
 
     cfg = _cfg(wave_plus=True)
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-05-10")].reset_index(
         drop=True
@@ -259,7 +259,7 @@ def test_eurusd_mar20_weekend_down_continuation_merges_to_single_ext():
         ext_enabled=True,
         ext_wave_min_pct=0.76,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     seg = df[(df["time"] >= "2026-03-20") & (df["time"] <= "2026-03-24")].reset_index(
         drop=True
@@ -410,7 +410,7 @@ def test_weekend_gap_relax_marks_mar20_and_apr10_as_ext():
         ext_wave_min_pct=0.76,
         ext_weekend_gap_relax_factor=0.5,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     full = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-05-10")].reset_index(
         drop=True
@@ -481,7 +481,7 @@ def test_weekend_gap_relax_disabled_keeps_strict_threshold():
         ext_wave_min_pct=0.76,
         ext_weekend_gap_relax_factor=0.0,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     full = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-05-10")].reset_index(
         drop=True
@@ -522,7 +522,7 @@ def test_weekend_gap_pct_zero_when_gap_opposite_to_wave_direction():
         ext_wave_min_pct=0.76,
         ext_weekend_gap_relax_factor=0.5,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     full = df[(df["time"] >= "2026-04-01") & (df["time"] <= "2026-04-07")].reset_index(
         drop=True
@@ -571,7 +571,7 @@ def test_eurusd_mar6_mar9_down_wave_anchors_pivot_on_friday_high_before_gap():
         ext_enabled=True,
         ext_wave_min_pct=0.76,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     seg = df[(df["time"] >= "2026-03-06 12:00") & (df["time"] <= "2026-03-09 12:00")].reset_index(
         drop=True

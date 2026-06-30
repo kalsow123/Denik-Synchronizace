@@ -31,7 +31,7 @@ timeframes = {
     "H1":  mt5.TIMEFRAME_H1,
 }
 
-symbol = "EURUSD.x"
+symbol = "EURUSD"
 bars = 500_000
 output_dir = Path(__file__).resolve().parent / "data"
 output_dir.mkdir(exist_ok=True)

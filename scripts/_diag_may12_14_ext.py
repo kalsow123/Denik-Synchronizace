@@ -18,7 +18,7 @@ def main() -> None:
             and not c.get("wave_counter_two_sided_enabled")
         )
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2025-05-10") & (df["time"] <= "2025-05-16")].reset_index(

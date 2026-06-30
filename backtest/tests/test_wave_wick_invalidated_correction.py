@@ -330,7 +330,7 @@ def test_real_data_fix_activates_and_is_surgical():
     """
     import os
 
-    csv_path = "data/EURUSD.x_M30.csv"
+    csv_path = "data/EURUSD_M30.csv"
     if not os.path.exists(csv_path):
         return
 

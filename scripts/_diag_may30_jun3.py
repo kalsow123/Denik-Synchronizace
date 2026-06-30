@@ -56,7 +56,7 @@ def show_w(w, eng, cfg, tag=""):
 
 def run(bos: bool):
     combo = pick_combo(bos)
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[

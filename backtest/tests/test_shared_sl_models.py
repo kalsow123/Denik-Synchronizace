@@ -20,7 +20,7 @@ def _cfg():
             "rrr": 2.0,
             "fib_level": 0.5,
             "entry_mode": "market_fallback",
-            "symbol": "EURUSD.x",
+            "symbol": "EURUSD",
             "sl_fib_level": 0.8,
             "wave_plus": True,
             "wave_size_sl_ladder_base_pct": 0.21,

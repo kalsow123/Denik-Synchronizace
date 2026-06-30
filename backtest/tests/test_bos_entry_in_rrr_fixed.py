@@ -34,7 +34,7 @@ def _base_grid() -> dict:
         "rrr": 2.0,
         "fib_level": 0.5,
         "entry_mode": "market_fallback",
-        "symbol": "EURUSD.x",
+        "symbol": "EURUSD",
         "sl_fib_level": 0.8,
         "abort_fib_level": "shift_sl",
         "wave_plus": True,
@@ -66,7 +66,7 @@ def test_rrr_fixed_pcm_number_opens_bos_reentry_when_flag_on():
     assert bos_flip_handler_should_run(cfg, close_pos=False, cancel_pend=False) is True
 
     df = pd.read_csv(
-        "data/EURUSD.x_M30.csv",
+        "data/EURUSD_M30.csv",
         parse_dates=["datetime"],
     )
     df = df.rename(columns={"datetime": "time"})
@@ -81,7 +81,7 @@ def test_rrr_fixed_pcm_number_opens_bos_reentry_when_flag_on():
 def test_rrr_fixed_pcm_number_zero_reentry_when_flag_off():
     cfg = grid_dict_to_bot_config(_base_grid())
     df = pd.read_csv(
-        "data/EURUSD.x_M30.csv",
+        "data/EURUSD_M30.csv",
         parse_dates=["datetime"],
     )
     df = df.rename(columns={"datetime": "time"})

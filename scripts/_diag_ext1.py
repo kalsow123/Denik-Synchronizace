@@ -10,7 +10,7 @@ from config.bot_config import LIVE_BOT_CONFIG
 from strategy.wave_sequence import compute_wave_sequence_info_per_wave
 
 cfg = LIVE_BOT_CONFIG
-df = pd.read_csv(ROOT / "data" / "EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(columns={"datetime": "time"})
+df = pd.read_csv(ROOT / "data" / "EURUSD_M30.csv", parse_dates=["datetime"]).rename(columns={"datetime": "time"})
 df = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-05-10")].reset_index(drop=True)
 eng = BacktestEngine(cfg)
 eng.run(df, retain_wave_snapshot=True)

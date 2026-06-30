@@ -15,7 +15,7 @@ def lock_cfg():
     return replace(
         LIVE_BOT_CONFIG,
         bot_name="TEST_LOCK_BOT",
-        symbol="EURUSD.x",
+        symbol="EURUSD",
         magic=999_999,
     )
 

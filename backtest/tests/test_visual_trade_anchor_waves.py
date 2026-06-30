@@ -26,7 +26,7 @@ def _testing_combo_bos_off():
 
 
 def _load_df(combo: dict) -> pd.DataFrame:
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     return df[

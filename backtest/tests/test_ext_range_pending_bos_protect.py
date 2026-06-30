@@ -41,7 +41,7 @@ def test_pending_protected_helper_outside_ext_range():
 def test_may29_ext_range_pending_fills_at_0830():
     """Vlna 202505290530: pending prezije 8:00 BOS cancel a fillne v 8:30."""
     cfg = LIVE_BOT_CONFIG
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     mask = (df["time"] >= "2025-05-28") & (df["time"] <= "2025-05-29 12:00:00")
     df = df[mask].reset_index(drop=True)

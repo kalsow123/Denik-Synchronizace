@@ -16,7 +16,7 @@ def _testing_combo():
 
 def test_may30_wave4_break_registers_bear_bos_and_bear_chain():
     cfg = _testing_combo()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2025-05-10") & (df["time"] <= "2025-06-05")].reset_index(

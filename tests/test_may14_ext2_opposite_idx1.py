@@ -10,7 +10,7 @@ from backtest.grid.translator import grid_dict_to_bot_config
 
 def test_ext2_up_first_opposite_bear_is_idx_1_not_2():
     cfg = grid_dict_to_bot_config(generate_combinations(get_profile("testing"))[0])
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2025-05-12") & (df["time"] <= "2025-05-16")].reset_index(

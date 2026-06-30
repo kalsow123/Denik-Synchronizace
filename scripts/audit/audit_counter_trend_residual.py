@@ -236,7 +236,7 @@ def compare_html_markers(baseline: Path, new: Path) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", default="data/EURUSD.x_M30.csv")
+    ap.add_argument("--csv", default="data/EURUSD_M30.csv")
     ap.add_argument("--date-from", default="2026-03-03")
     ap.add_argument("--date-to", default="2026-05-08")
     ap.add_argument("--baseline-html", default="")

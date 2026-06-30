@@ -15,7 +15,7 @@ from strategy.trend_bos import compute_bos_wave_flip_map
 from strategy.wave_sequence import compute_wave_sequence_info_per_wave
 
 cfg = LIVE_BOT_CONFIG
-df = pd.read_csv(ROOT / "data" / "EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+df = pd.read_csv(ROOT / "data" / "EURUSD_M30.csv", parse_dates=["datetime"]).rename(
     columns={"datetime": "time"}
 )
 df = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-03-06")].reset_index(drop=True)

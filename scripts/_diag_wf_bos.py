@@ -25,7 +25,7 @@ def cfg_wave_target_n():
 
 
 def load_df() -> pd.DataFrame:
-    df = pd.read_csv(ROOT / "data" / "EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv(ROOT / "data" / "EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     return df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-05-10")].reset_index(drop=True)

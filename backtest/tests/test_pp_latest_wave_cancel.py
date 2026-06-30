@@ -9,7 +9,7 @@ from backtest.engine import BacktestEngine
 
 def test_new_trend_wave_cancels_pp_replaced_vis():
     cfg = BotConfig(
-        symbol="EURUSD.x",
+        symbol="EURUSD",
         timeframe=30,
         wave_min_pct=0.26,
         min_opp_bars=3,
@@ -21,7 +21,7 @@ def test_new_trend_wave_cancels_pp_replaced_vis():
         trend_filter_enabled=True,
         trend_hh_hl_filter_enabled=True,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2026-03-04") & (df["time"] <= "2026-03-07")].reset_index(

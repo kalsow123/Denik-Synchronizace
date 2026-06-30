@@ -25,7 +25,7 @@ def _base(**overrides):
         "rrr": 2.0,
         "fib_level": 0.5,
         "entry_mode": "market_fallback",
-        "symbol": "EURUSD.x",
+        "symbol": "EURUSD",
         "tp_mode": "wave_target_n",
         "tp_target_wave_index": 4,
         "wave_extension_pct": 0.20,

@@ -11,7 +11,7 @@ from strategy.wave_sequence import compute_wave_sequence_info_per_wave
 
 def run_diag():
     cfg = BotConfig(
-        symbol="EURUSD.x",
+        symbol="EURUSD",
         timeframe=30,
         wave_min_pct=0.26,
         min_opp_bars=3,

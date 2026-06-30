@@ -256,7 +256,7 @@ def _summary_table(df: pd.DataFrame, group_col: str, outcome_col: str) -> pd.Dat
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="EXT pozice — trend po uzavření")
-    ap.add_argument("--csv", type=Path, default=ROOT / "data" / "EURUSD.x_M30.csv")
+    ap.add_argument("--csv", type=Path, default=ROOT / "data" / "EURUSD_M30.csv")
     ap.add_argument("--date-from", default="2026-03-03")
     ap.add_argument("--date-to", default="2026-05-10")
     ap.add_argument("--tp-mode", default="wave_target_n_g")

@@ -33,7 +33,7 @@ def test_post_ext_confirmed_lock_blocks_subsequent_waves():
     Po UP (2) se trend potvrdi a vsechny dalsi vlny maji lock=True.
     """
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     # Vybereme obdobi, kde vime, ze mame EXT UP a nasledne vlny
     # (pouzito obdobi z test_ext_range.py)

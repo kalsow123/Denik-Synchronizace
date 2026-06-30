@@ -431,7 +431,7 @@ Příčina 2 — KONKRÉTNÍ BUG:
   - 2 selhání (EXT1_PROTECT_END_BETTER_RRR_TP) jsou NESOUVISEJÍCÍ s opravou
     (funkce ext1_protect_live.py nevolá změněné funkce) — padají na rozdílu dat
     poskytovatele (EURUSD_M30.csv vs .x), ne na logice.
-  - V testech opravena hardcoded cesta data/EURUSD.x_M30.csv → data/EURUSD_M30.csv.
+  - V testech opravena hardcoded cesta data/EURUSD_M30.csv → data/EURUSD_M30.csv.
 
 11.5 CO ZBÝVÁ (mimo exit vrstvu)
 --------------------------------
@@ -554,7 +554,7 @@ ZMĚNY:
     (setdefault) → caller (live_loop/run_e2e) má kompletní birth mapu.
   - runtime/wf_live.py::_build_activation + process: předává SDÍLENOU birth mapu
     (dřív čerstvá throwaway compute_wave_birth_bars_pine → births se ztrácely).
-  - tests: opravena cesta data/EURUSD.x_M30.csv → data/EURUSD_M30.csv ve
+  - tests: opravena cesta data/EURUSD_M30.csv → data/EURUSD_M30.csv ve
     test_wf_merge_recomputes_wave_sequence.py a test_wf_no_bos.py.
 
 OVĚŘENÍ:

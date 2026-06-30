@@ -39,7 +39,7 @@ def _sample_results_with_trades() -> dict:
             "config": {
                 "bot_name": "bot_a",
                 "_grid_test_pozice": 1,
-                "symbol": "EURUSD.x",
+                "symbol": "EURUSD",
                 "timeframe": "M30",
                 "date_from": "2026-01-01",
                 "date_to": "2026-05-10",

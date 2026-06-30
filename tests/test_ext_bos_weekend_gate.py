@@ -55,7 +55,7 @@ def _may19_cfg():
 def test_may19_no_ext_bos_close_before_weekend_ext_draw_right():
     """May 19 05:30: EXT merge vlna 202505190400 — zadny EXT_BOS_CLOSE pred draw_right."""
     cfg = _may19_cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2025-05-14") & (df["time"] <= "2025-05-20")].reset_index(

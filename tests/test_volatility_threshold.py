@@ -23,7 +23,7 @@ def _make_wave(wt: str, move_pct: float, d: int) -> dict:
 
 def _make_cfg(**kwargs) -> BotConfig:
     cfg = BotConfig(
-        symbol="EURUSD.x",
+        symbol="EURUSD",
         ext_enabled=True,
         ext_trade_both_sides_in_range=True,
         wave_min_pct=0.26,

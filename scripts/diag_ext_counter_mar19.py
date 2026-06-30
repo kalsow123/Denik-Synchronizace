@@ -18,7 +18,7 @@ def _example_cfg() -> BotConfig:
         "rrr": 2.0,
         "fib_level": 0.5,
         "entry_mode": "market_fallback",
-        "symbol": "EURUSD.x",
+        "symbol": "EURUSD",
         "sl_fib_level": 0.8,
         "abort_fib_level": "shift_sl",
         "wave_plus": True,
@@ -35,7 +35,7 @@ def _example_cfg() -> BotConfig:
 
 def main() -> None:
     cfg = _example_cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     mask = (df["time"] >= "2026-03-18") & (df["time"] <= "2026-03-21")
     df = df.loc[mask].reset_index(drop=True)

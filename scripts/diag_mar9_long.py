@@ -18,7 +18,7 @@ from strategy.ext_logic import (
 def main() -> None:
     cfg = BotConfig(
         bot_name="DIAG",
-        symbol="EURUSD.x",
+        symbol="EURUSD",
         timeframe=30,
         wave_min_pct=0.26,
         min_opp_bars=3,
@@ -39,7 +39,7 @@ def main() -> None:
     )
     spread_half = 0.0001 / 2
 
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-05") & (df["time"] <= "2026-03-12")].reset_index(
         drop=True

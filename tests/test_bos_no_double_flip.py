@@ -103,7 +103,7 @@ def test_collect_bos_flip_events_no_adjacent_same_direction_synthetic(monkeypatc
 def test_collect_bos_flip_events_no_adjacent_same_direction_live_data():
     """LIVE_BOT_CONFIG + EURUSD M30 — drive 5 dvojic bull-bull / bear-bear."""
     cfg = LIVE_BOT_CONFIG
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-01") & (df["time"] <= "2026-05-01")].reset_index(
         drop=True

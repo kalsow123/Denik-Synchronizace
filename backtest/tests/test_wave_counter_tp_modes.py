@@ -24,7 +24,7 @@ def _cfg(tp_mode: str):
             "rrr": 2.0,
             "fib_level": 0.5,
             "entry_mode": "market_fallback",
-            "symbol": "EURUSD.x",
+            "symbol": "EURUSD",
             "sl_fib_level": 0.8,
             "wave_plus": True,
             "risk_usd": 500.0,

@@ -16,7 +16,7 @@ from strategy.ext_logic import is_ext_counter_trade
 from strategy.wave_sequence import should_close_trade_on_bos_flip
 
 cfg = LIVE_BOT_CONFIG
-df = pd.read_csv(ROOT / "data" / "EURUSD.x_M30.csv", parse_dates=["datetime"])
+df = pd.read_csv(ROOT / "data" / "EURUSD_M30.csv", parse_dates=["datetime"])
 df = df.rename(columns={"datetime": "time"})
 df = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-05-10")].reset_index(drop=True)
 

@@ -21,7 +21,7 @@ from strategy.wave_sequence import is_tp_wave_index
 
 
 def main() -> None:
-    df = load_data("EURUSD.x", "M30", "2026-03-03", "2026-05-10")
+    df = load_data("EURUSD", "M30", "2026-03-03", "2026-05-10")
     combos = list(generate_combinations(get_profile("EXAMPLE")))
     print("EXAMPLE counter combos (fresh):")
     for i, c in enumerate(combos):

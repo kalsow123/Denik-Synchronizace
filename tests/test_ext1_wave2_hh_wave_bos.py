@@ -49,7 +49,7 @@ def _find_ext1_wave2_scenario(eng: BacktestEngine) -> tuple[str, str] | None:
 
 def test_ext1_wave2_hh_ends_ext_and_allows_wave_bos():
     cfg = _testing_combo()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2025-01-01") & (df["time"] <= "2025-12-31")].reset_index(

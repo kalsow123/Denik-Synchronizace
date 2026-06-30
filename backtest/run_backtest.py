@@ -13,7 +13,7 @@ ZAKLADNI POUZITI
   python -m backtest.run_backtest --profile grid --grid-profile positions_setting
 
   # Heatmap wave_min_pct × rrr z uloženého grid_report.xlsx
-  python scripts/plot_grid_heatmap.py results/EURUSD.x/grid_<profil>_M15_<datum>_<NNN>/grid_report.xlsx -o results/heatmap.png
+  python scripts/plot_grid_heatmap.py results/EURUSD/grid_<profil>_M15_<datum>_<NNN>/grid_report.xlsx -o results/heatmap.png
 
   Po přenosu složky z jiného PC: z kořene repa spusťte .\\scripts\\setup_venv.ps1 (nový .venv + pip),
   případně viz PowerShell sekce v backtest/grid/backtest_conf.py.

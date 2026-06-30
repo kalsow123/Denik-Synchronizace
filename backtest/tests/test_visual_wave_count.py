@@ -10,7 +10,7 @@ from strategy.wick_fakeout import WAVE_ORIGIN_WF
 
 
 def _load_segment() -> pd.DataFrame:
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     return df[

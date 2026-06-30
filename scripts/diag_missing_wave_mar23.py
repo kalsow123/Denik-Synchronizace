@@ -25,7 +25,7 @@ def main() -> None:
         tp_mode=TPMode.WAVE_TARGET_N,
         tp_target_wave_index=4,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2026-03-20") & (df["time"] <= "2026-03-25")].reset_index(

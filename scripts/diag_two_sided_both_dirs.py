@@ -31,7 +31,7 @@ def main() -> None:
         entry_mode=EntryMode.MARKET_FALLBACK,
         tp_mode=TPMode.BOS_EXIT,
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2026-03-01") & (df["time"] <= "2026-05-10")].reset_index(

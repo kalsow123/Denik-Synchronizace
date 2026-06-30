@@ -26,7 +26,7 @@ def _testing_cfg():
 
 @pytest.fixture
 def may_df():
-    path = "data/EURUSD.x_M30.csv"
+    path = "data/EURUSD_M30.csv"
     df = pd.read_csv(path, parse_dates=["datetime"]).rename(columns={"datetime": "time"})
     return df[(df["time"] >= "2025-05-10") & (df["time"] <= "2025-05-26")].reset_index(
         drop=True

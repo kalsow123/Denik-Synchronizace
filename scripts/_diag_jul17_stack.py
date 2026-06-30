@@ -18,7 +18,7 @@ def main() -> None:
         and not c.get("pp_enabled")
         and c.get("wave_counter_two_sided_enabled")
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     # Warmup od 14.7., aby EXT/lock kontext sedel

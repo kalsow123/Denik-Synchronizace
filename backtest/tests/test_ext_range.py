@@ -34,7 +34,7 @@ def _cfg(**kw) -> BotConfig:
 
 def test_first_up_after_bear_ext_in_range_and_allowed():
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-05") & (df["time"] <= "2026-03-11")].reset_index(
         drop=True
@@ -59,7 +59,7 @@ def test_first_up_after_bear_ext_in_range_and_allowed():
 
 def test_ext_range_stops_after_any_wave_bos_flip():
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-05") & (df["time"] <= "2026-03-12")].reset_index(
         drop=True
@@ -74,7 +74,7 @@ def test_ext_range_stops_after_any_wave_bos_flip():
 
 def test_ext_range_stops_on_second_same_direction_wave_even_if_interleaved():
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-18") & (df["time"] <= "2026-03-21")].reset_index(
         drop=True
@@ -90,7 +90,7 @@ def test_ext_range_stops_on_second_same_direction_wave_even_if_interleaved():
 
 def test_second_same_direction_wave_after_ext_seeds_new_trend():
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-22") & (df["time"] <= "2026-03-31")].reset_index(
         drop=True
@@ -127,7 +127,7 @@ def test_second_same_direction_wave_after_ext_still_seeds_even_after_bos():
     cfg = _cfg()
     cfg.wave_position_enabled = True
     cfg.tp_mode = TPMode.BOS_EXIT
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-05") & (df["time"] <= "2026-03-10 23:59:59")].reset_index(
         drop=True
@@ -157,7 +157,7 @@ def test_second_same_direction_wave_after_ext_still_seeds_even_after_bos():
 
 def test_ext_trade_range_termination_does_not_drop_classic_wave_measurement():
     cfg = _cfg()
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-19") & (df["time"] <= "2026-03-31")].reset_index(
         drop=True
@@ -185,7 +185,7 @@ def test_visual_keeps_counter_wave_that_precedes_bos_flip():
     cfg = _cfg()
     cfg.wave_position_enabled = True
     cfg.tp_mode = TPMode.BOS_EXIT
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-03") & (df["time"] <= "2026-03-06 23:59:59")].reset_index(
         drop=True
@@ -208,7 +208,7 @@ def test_post_ext_hh_terminator_no_seed_april_1():
     cfg = _cfg()
     cfg.wave_position_enabled = True
     cfg.tp_mode = TPMode.BOS_EXIT
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-30") & (df["time"] <= "2026-04-03 23:59:59")].reset_index(
         drop=True
@@ -241,7 +241,7 @@ def test_post_ext_trend_suppression_march_24_up_waves_invisible():
     cfg = _cfg()
     cfg.wave_position_enabled = True
     cfg.tp_mode = TPMode.BOS_EXIT
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-22") & (df["time"] <= "2026-03-26 23:59:59")].reset_index(
         drop=True
@@ -278,7 +278,7 @@ def test_post_ext_suppressed_wave_is_not_picked_as_bos_wave():
     cfg = _cfg()
     cfg.wave_position_enabled = True
     cfg.tp_mode = TPMode.BOS_EXIT
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-22") & (df["time"] <= "2026-03-26 23:59:59")].reset_index(
         drop=True
@@ -303,7 +303,7 @@ def test_retro_bos_wave_only_contains_actual_bos_causing_waves():
     cfg.wave_position_enabled = True
     cfg.tp_mode = TPMode.BOS_EXIT
 
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
 
     # Segment 10. brezna — BOS-vlna pro bear flip (b95) je 202603102230:

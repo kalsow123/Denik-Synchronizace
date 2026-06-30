@@ -14,7 +14,7 @@ from strategy.wave_sequence import (
 
 
 def _load_test_data():
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     # Použít sekci, kde je vidět BOS flip a nový trend s EXT
     df = df[(df["time"] >= "2026-03-15") & (df["time"] <= "2026-04-20")].reset_index(drop=True)

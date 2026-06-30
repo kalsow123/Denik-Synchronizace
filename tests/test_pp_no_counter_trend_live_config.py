@@ -13,14 +13,14 @@ from strategy.wave_detection import detect_waves
 
 
 @pytest.mark.skipif(
-    not Path("data/EURUSD.x_M30.csv").exists(),
+    not Path("data/EURUSD_M30.csv").exists(),
     reason="EURUSD M30 CSV not present",
 )
 def test_live_config_zero_pp_counter_trend_at_placement():
     cfg = LIVE_BOT_CONFIG
     if not cfg.pp_enabled:
         pytest.skip("pp_enabled off")
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"]).rename(
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"]).rename(
         columns={"datetime": "time"}
     )
     df = df[(df["time"] >= "2026-03-01") & (df["time"] <= "2026-04-30")].reset_index(

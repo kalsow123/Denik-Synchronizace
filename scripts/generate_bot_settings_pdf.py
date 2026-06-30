@@ -18,7 +18,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         [
             (
                 "symbol",
-                "Obchodovany instrument (napr. EURUSD.x). Nastavuje par, na ktery "
+                "Obchodovany instrument (napr. EURUSD). Nastavuje par, na ktery "
                 "backtester nacita data a simuluje obchody. Moznosti: libovolny symbol "
                 "podporovany CSV daty projektu.",
             ),

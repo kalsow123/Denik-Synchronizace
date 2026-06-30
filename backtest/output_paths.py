@@ -15,7 +15,7 @@ def symbol_folder_name(symbol: str) -> str:
     """
     Název složky pro výsledky backtestu — bez koncovky poskytovatele likvidity.
 
-    USDCAD.x, EURUSD.r, GER40.cash → USDCAD, EURUSD, GER40 (část za poslední tečkou se ignoruje).
+    USDCAD.x, EURUSD, GER40.cash → USDCAD, EURUSD, GER40 (část za poslední tečkou se ignoruje).
     Symbol bez tečky (EU50p) zůstane beze změny.
     """
     s = str(symbol or "").strip()

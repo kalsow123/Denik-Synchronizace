@@ -19,7 +19,7 @@ def test_grid_implicit_wave_positions_only():
         "bos_entry_enable": False,
         "ext_enabled": False,
         "ext_counter_enabled": False,
-        "symbol": "EURUSD.x",
+        "symbol": "EURUSD",
         "timeframe": "M30",
         "wave_min_pct": 0.26,
         "min_opp_bars": 3,
@@ -42,7 +42,7 @@ def test_grid_wave_isolation_study_enables_engine_counter():
         "pp_enabled": True,
         "bos_entry_enable": True,
         "ext_enabled": True,
-        "symbol": "EURUSD.x",
+        "symbol": "EURUSD",
         "timeframe": "M30",
         "wave_min_pct": 0.26,
         "min_opp_bars": 3,
@@ -103,7 +103,7 @@ def test_live_implicit_wave_only_from_flags():
 
 def test_translator_wave_isolation_matches_full_counter():
     base = {
-        "symbol": "EURUSD.x",
+        "symbol": "EURUSD",
         "timeframe": "M30",
         "wave_min_pct": 0.26,
         "min_opp_bars": 3,

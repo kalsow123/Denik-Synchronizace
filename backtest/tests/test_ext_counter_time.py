@@ -66,7 +66,7 @@ def test_engine_ext_counter_at_21h_while_ext_forming_before_confirm():
             "rrr": 2.0,
             "fib_level": 0.5,
             "entry_mode": "market_fallback",
-            "symbol": "EURUSD.x",
+            "symbol": "EURUSD",
             "sl_fib_level": 0.8,
             "wave_plus": True,
             "ext_enabled": True,
@@ -78,7 +78,7 @@ def test_engine_ext_counter_at_21h_while_ext_forming_before_confirm():
             "pp_enabled": False,
         }
     )
-    df = pd.read_csv("data/EURUSD.x_M30.csv", parse_dates=["datetime"])
+    df = pd.read_csv("data/EURUSD_M30.csv", parse_dates=["datetime"])
     df = df.rename(columns={"datetime": "time"})
     df = df[(df["time"] >= "2026-03-18") & (df["time"] <= "2026-03-21")].reset_index(
         drop=True

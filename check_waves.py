@@ -9,7 +9,7 @@ cfg = BotConfig(
     ext_post_confirmed_trend_lock_enabled=True,
     ext_post_confirmed_trend_lock_blocks_both_sides=True
 )
-df = pd.read_csv('data/EURUSD.x_M30.csv', parse_dates=['datetime']).rename(columns={'datetime':'time'})
+df = pd.read_csv('data/EURUSD_M30.csv', parse_dates=['datetime']).rename(columns={'datetime':'time'})
 df = df[(df['time']>='2026-03-22') & (df['time']<='2026-03-26 23:59:59')].reset_index(drop=True)
 eng = BacktestEngine(cfg)
 eng.run(df, retain_wave_snapshot=True)
