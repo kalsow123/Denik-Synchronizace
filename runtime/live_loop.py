@@ -19,7 +19,7 @@ from core.logging_utils import (
 from core.signal_keys import get_signal_key
 from infra.account import get_account_snapshot
 from infra.trade_tracker import TradeTrackerState, update_trade_tracker
-from infra.market_data import get_bars
+from core.market_data import load_bars, strip_forming_bar
 from infra.position_cap_live import enforce_live_position_cap
 from infra.orders import (
     cancel_expired_pending,
@@ -400,9 +400,7 @@ def _last_closed_bar_time(df: pd.DataFrame) -> pd.Timestamp:
 
 def _df_closed_bars_only(df: pd.DataFrame) -> pd.DataFrame:
     """Strategie bezi jen na uzavrenych barech — odstrani forming bar z MT5."""
-    if len(df) < 2:
-        return df
-    return df.iloc[:-1].reset_index(drop=True)
+    return strip_forming_bar(df)
 
 
 def _maybe_fire_pp_break_event(*, cfg: BotConfig, df, waves,
@@ -1276,21 +1274,27 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
             # Cancel expirovanych pendingu
             cancel_expired_pending(cfg)
 
-            df = get_bars(cfg, cfg.startup_bars)
-            if df is None:
+            df = load_bars(cfg, source="mt5", n=cfg.startup_bars, include_forming=False)
+            if df is None or df.empty:
                 log.warning("Nepodarilo se nacist data, zkousim znovu...")
                 time.sleep(cfg.sleep_sec)
                 continue
 
             if adx14_runtime.active and adx14_runtime.needs_history_bars():
-                adx14_df = get_bars(cfg, int(getattr(cfg, "adx14_history_bars", 5000)))
+                adx14_df = load_bars(
+                    cfg,
+                    source="mt5",
+                    n=int(getattr(cfg, "adx14_history_bars", 5000)),
+                    include_forming=False,
+                )
                 adx14_runtime.update(adx14_df if adx14_df is not None else df, broker_now)
             elif adx14_runtime.active:
                 adx14_runtime.update(df, broker_now)
 
             entries_allowed = adx14_runtime.entries_allowed
 
-            closed_bar_ts = _last_closed_bar_time(df)
+            # load_bars(include_forming=False) = jen uzavrene bary; posledni radek = posledni close.
+            closed_bar_ts = pd.Timestamp(df["time"].iloc[-1])
             if (
                 last_processed_closed_bar_time is not None
                 and closed_bar_ts <= last_processed_closed_bar_time
@@ -1298,7 +1302,6 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                 _emit_live_periodic_logs()
                 continue
 
-            df = _df_closed_bars_only(df)
             from runtime.missed_bar_replay import new_closed_bar_indices
 
             new_bar_indices = new_closed_bar_indices(

@@ -8,7 +8,8 @@ from config.bot_config import BotConfig
 
 # ───── NAČÍTÁNÍ OHLC (candles) DAT Z MT5 ──────────────────────────
 
-# Načítá candles z MT5 (copy_rates_from_pos) — live bot, ne CSV.
+# Nízká vrstva MT5 fetch. Live/backtest sjednocení přes ``core.market_data.load_bars``
+# (source="mt5"); forming-bar strip patří do load_bars, ne sem.
 def get_bars(cfg: BotConfig, n: int = 300) -> Optional[pd.DataFrame]:
     rates = mt5.copy_rates_from_pos(cfg.symbol, cfg.timeframe, 0, n)
     if rates is None or len(rates) == 0:
