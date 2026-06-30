@@ -1,37 +1,61 @@
 ================================================================================
-NAPOJENÍ NOVÉHO LIVE BOTA NA GITHUB TELEMETRY (stejně jako XAUUSD_FXIFY_2)
+NAPOJENÍ LIVE BOTA NA GITHUB TELEMETRY (bot-telemetry) — SSH verze
 ================================================================================
 
-Tento soubor slouží jako kompletní instrukce pro Cursor. Vlož ho do chatu
-(u přílohy nebo zkopíruj obsah) a doplň proměnné v sekci KONTEXT.
+Tento soubor slouží jako kompletní instrukce pro Cursor AI.
+Vlož ho do chatu (příloha nebo celý obsah) a doplň proměnné v sekci KONTEXT.
 
-Referenční bot: XAUUSD_FXIFY_2
-Telemetry repo: git@github.com:kalsow123/bot-telemetry.git (branch: main)
+Referenční implementace: 3_EURUSD_100k_n=2_FTMO (FTMO_100k)
+Telemetry repo:  https://github.com/kalsow123/bot-telemetry  (branch: main)
+Git remote (SSH): git@github.com:kalsow123/bot-telemetry.git
+
+DŮLEŽITÉ: Push do telemetry repa MUSÍ běžet přes SSH, NE přes HTTPS.
+HTTPS způsobuje opakované okno „Connect to GitHub“ a selhání syncu na pozadí.
+
+
+================================================================================
+ÚKOL PRO CURSOR AI (POVINNÉ CHOVÁNÍ)
+================================================================================
+
+Při napojování bota na telemetry MUSÍŠ:
+
+1) VŽDY nejdřív ověřit / vytvořit SSH klíč pro daný VPS (viz sekce SSH).
+2) VYNUTIT u uživatele přidání veřejného klíče na GitHub (Settings → SSH keys).
+   - Poskytnout přesný obsah pole Title a Key (viz šablona níže).
+   - Title MUSÍ obsahovat veřejnou IP adresu VPS (např. „185.123.45.67 bot-telemetry“).
+3) NIKDY nepoužívat HTTPS remote pro bot-telemetry (žádné tokeny / Credential Manager).
+4) Nastavit git remote na SSH a core.sshCommand (Git for Windows).
+5) Ověřit push příkazem `git ls-remote origin HEAD` a `sync --once`.
+6) Na závěr potvrdit commit na GitHubu v logs/<BOT_ID>/.
+
+Pokud SSH klíč na GitHubu chybí, NEPOKRAČUJ k restartu bota — nejdřív dokonči SSH.
 
 
 ================================================================================
 KONTEXT — DOPLŇ PŘED SPUŠTĚNÍM
 ================================================================================
 
-- BOT_PROJECT_PATH:     <např. C:\Users\Administrator\Desktop\Standa_trading_testing_2\EU50_Trading_BOT_Fintokey_1>
-- BOT_NAME / BOT_ID:    <např. EU50_Fintokey_1>   ← musí být stejné všude
+- BOT_PROJECT_PATH:     <např. C:\Trading_bots\FTMO_100k>
+- BOT_NAME / BOT_ID:    <např. 3_EURUSD_100k_n=2_FTMO>   ← musí být stejné všude
+- VPS_PUBLIC_IP:        <např. 185.123.45.67>            ← pro název SSH klíče na GitHubu
 - TELEMETRY_REPO_PATH:  <např. C:\Users\Administrator\Desktop\bot-telemetry>
 - TELEMETRY_GIT_REMOTE: git@github.com:kalsow123/bot-telemetry.git
 - TARGET_BRANCH:        main
+- WINDOWS_USER:         <např. Administrator>            ← účet pod kterým běží bot
 
 
 ================================================================================
 CÍL
 ================================================================================
 
-Nastavit nového bota tak, aby:
-1) při běhu generoval lokální JSONL telemetrii ve stejném formátu jako reference bot,
-2) průběžně synchronizoval data do GitHub repozitáře bot-telemetry,
-3) dashboard viděl bota pod logs/<BOT_ID>/live_bot.jsonl a logs/<BOT_ID>/bot_config.jsonl.
+Nastavit bota tak, aby:
+1) generoval lokální JSONL telemetrii (<BOT_NAME>.jsonl + _config.jsonl),
+2) průběžně synchronizoval data do GitHub repa bot-telemetry přes SSH,
+3) dashboard viděl bota pod logs/<BOT_ID>/live_bot.jsonl a bot_config.jsonl.
 
 
 ================================================================================
-ARCHITEKTURA (musíš dodržet)
+ARCHITEKTURA
 ================================================================================
 
 Tok dat:
@@ -41,284 +65,322 @@ Tok dat:
     → autostart:     scripts/sync_live_jsonl_to_github.py (pokud existuje .env.sync)
 
   Sync skript
-    → kopíruje do:   <TELEMETRY_REPO_PATH>\logs\<BOT_ID>\live_bot.jsonl
-                     <TELEMETRY_REPO_PATH>\logs\<BOT_ID>\bot_config.jsonl
-    → git commit + push → GitHub (bot-telemetry)
+    → sdílený lock:   <TELEMETRY_REPO_PATH>\.telemetry_sync.lock
+    → pull --rebase --autostash (nejdřív stáhnout cizí commity)
+    → kopíruje do:   logs/<BOT_ID>/live_bot.jsonl
+                     logs/<BOT_ID>/bot_config.jsonl
+    → git commit + push (SSH) → GitHub
 
   Dashboard
     → čte z GitHubu složku logs/<BOT_ID>/
 
 
---- Lokálně (v kořeni projektu bota) ---
+--- SSH pravidla ---
 
-Bot při startu (main.py) automaticky vytváří:
-- <BOT_NAME>.jsonl           — append-only live eventy (HEARTBEAT, STATUS, obchody, …)
-- <BOT_NAME>_config.jsonl    — 1 řádek snapshot konfigurace při startu (event: BOT_CONFIG_SNAPSHOT)
-
-Názvy vycházejí z cfg.bot_name v config/bot_config.py:
-
-  safe_bot_name = re.sub(r"[^A-Za-z0-9._-]+", "_", cfg.bot_name).strip("._-") or "bot"
-  json_log_file = f"{safe_bot_name}.jsonl"
-  config_snapshot_file = f"{safe_bot_name}_config.jsonl"
-
-
---- V telemetry git repu (GitHub) ---
-
-Sync skript scripts/sync_live_jsonl_to_github.py kopíruje:
-- <BOT_NAME>.jsonl           → logs/<BOT_ID>/live_bot.jsonl
-- <BOT_NAME>_config.jsonl    → logs/<BOT_ID>/bot_config.jsonl
-
-BOT_ID v .env.sync MUSÍ být stejné jako bot_name v configu (konvence jako u XAUUSD_FXIFY_2).
-
-Pozn.: Lokální názvy (XAUUSD_FXIFY_2.jsonl) a názvy v gitu (live_bot.jsonl) se liší
-záměrně — sync je přejmenuje podle konvence telemetry repa.
-
-
---- Autostart syncu ---
-
-Při startu bota (main.py → _start_telemetry_sync) se automaticky spustí sync podproces,
-pokud existuje .env.sync a skript scripts/sync_live_jsonl_to_github.py.
-
-Sync lze vypnout env proměnnou: DISABLE_TELEMETRY_SYNC=1
+- 1 SSH klíč = 1 VPS (Windows účet), NE 1 klíč na každého bota.
+- Na stejném VPS všechny boty sdílejí ~/.ssh/id_ed25519 a jeden clone bot-telemetry.
+- Každý bot má vlastní .env.sync (jiný BOT_ID, jiné SOURCE_* cesty).
+- Na GitHubu je klíč v účtu (Settings → SSH keys), NE v repozitáři.
+- Title klíče na GitHubu = IP VPS (např. „185.123.45.67 bot-telemetry“).
 
 
 ================================================================================
-KROKY K PROVEDENÍ
+KROK 0 — SSH KLÍČ PRO VPS (POVINNÉ, CURSOR MUSÍ PROVÉST / VEDENÍ UŽIVATELE)
 ================================================================================
 
-1) Ověř strukturu projektu bota
---------------------------------
+0a) Zjisti veřejnou IP VPS
+--------------------------
 
-V BOT_PROJECT_PATH musí existovat (stejně jako u reference XAUUSD_FXIFY_2):
+  (Invoke-RestMethod -Uri "https://api.ipify.org").Trim()
+  # nebo ip z panelu poskytovatele VPS
+
+Ulož jako VPS_PUBLIC_IP pro název klíče na GitHubu.
+
+
+0b) Vygeneruj SSH klíč (pokud neexistuje)
+-----------------------------------------
+
+  $sshDir = Join-Path $env:USERPROFILE ".ssh"
+  New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
+  $keyPath = Join-Path $sshDir "id_ed25519"
+  if (-not (Test-Path $keyPath)) {
+    ssh-keygen -t ed25519 -C "bot-telemetry-$VPS_PUBLIC_IP" -f $keyPath -N '""'
+  }
+  Get-Content "$keyPath.pub"
+
+Soukromý klíč: C:\Users\<WINDOWS_USER>\.ssh\id_ed25519
+Veřejný klíč:  C:\Users\<WINDOWS_USER>\.ssh\id_ed25519.pub
+
+
+0c) SSH config pro GitHub
+-------------------------
+
+Soubor: C:\Users\<WINDOWS_USER>\.ssh\config
+
+  Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+
+
+0d) GitHub known_hosts (pokud ssh-keyscan selže)
+------------------------------------------------
+
+Do C:\Users\<WINDOWS_USER>\.ssh\known_hosts přidej:
+
+  github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqkkDXDaWlUj7xoJ6d4e9QqTz9l2Gd2om6k7D
+
+
+0e) CURSOR MUSÍ uživatele vést — přidání klíče na GitHub
+---------------------------------------------------------
+
+Otevři: https://github.com/settings/keys → New SSH key
+
+| Pole GitHubu      | Co vyplnit                                              |
+|-------------------|---------------------------------------------------------|
+| Title             | <VPS_PUBLIC_IP> bot-telemetry                           |
+|                   | Příklad: 185.123.45.67 bot-telemetry                    |
+| Key type          | Authentication Key                                      |
+| Key               | celý řádek z id_ed25519.pub (začíná ssh-ed25519 ...)     |
+
+Pak klik: Add SSH key
+
+CURSOR vypíše uživateli přesný obsah pole Key (celý řádek z .pub souboru).
+
+
+0f) Ověření SSH (až po přidání klíče na GitHub)
+-----------------------------------------------
+
+  ssh -o BatchMode=yes -T git@github.com
+
+Očekáváno:
+  Hi kalsow123! You've successfully authenticated, but GitHub does not provide shell access.
+
+Pokud „Permission denied (publickey)“ → klíč na GitHubu chybí nebo je špatně zkopírovaný.
+
+
+================================================================================
+KROK 1 — TELEMETRY GIT REPO NA VPS
+================================================================================
+
+Pokud TELEMETRY_REPO_PATH neexistuje:
+
+  git clone git@github.com:kalsow123/bot-telemetry.git "<TELEMETRY_REPO_PATH>"
+
+Pokud existuje ale má HTTPS remote, přepni na SSH:
+
+  cd "<TELEMETRY_REPO_PATH>"
+  git remote set-url origin git@github.com:kalsow123/bot-telemetry.git
+  git remote -v
+
+Git for Windows musí používat OpenSSH s klíčem (jinak sync na pozadí selže):
+
+  git config core.sshCommand "C:/Windows/System32/OpenSSH/ssh.exe -i C:/Users/<WINDOWS_USER>/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+Ověř:
+
+  cd "<TELEMETRY_REPO_PATH>"
+  git fetch origin main
+  git ls-remote origin HEAD
+
+Na jednom VPS stačí JEDEN clone bot-telemetry pro všechny boty.
+
+
+================================================================================
+KROK 2 — STRUKTURA PROJEKTU BOTA
+================================================================================
+
+V BOT_PROJECT_PATH musí existovat:
 - main.py
 - config/bot_config.py
-- core/logging_utils.py
-- scripts/sync_live_jsonl_to_github.py
+- infra/telemetry_sync.py
+- scripts/sync_live_jsonl_to_github.py   ← aktuální verze se sdíleným lockem + SSH
 - scripts/run_sync_live_jsonl.ps1
+- scripts/restart_bot.ps1
 - .env.sync.example
 
-Pokud sync skripty chybí, zkopíruj je z reference projektu XAUUSD_FXIFY_2 beze změny logiky.
+Sync skript (minimální požadavky na logiku):
+- lock: <TELEMETRY_REPO_PATH>\.telemetry_sync.lock  (sdílený pro všechny boty na VPS)
+- pořadí: pull --rebase --autostash → copy → add → commit → push
+- git identita v podprocesu (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL)
+- retry push při kolizi větve main (více botů / VPS pushuje do stejného repa)
+
+Pokud sync skript chybí nebo je starý, zkopíruj z referenčního projektu FTMO_100k
+(commit v Denik-Synchronizace: shared telemetry lock + SSH fixes).
 
 
-2) Nastav identitu bota v configu
----------------------------------
+================================================================================
+KROK 3 — IDENTITA BOTA V CONFIGU
+================================================================================
 
-V config/bot_config.py u LIVE_BOT_CONFIG (nebo aktivního configu) nastav:
-- bot_name = "<BOT_NAME>"       ← přesně stejný string jako BOT_ID
-- magic = <unikátní číslo>      ← nesmí kolidovat s jinými boty na stejném MT5
+V config/bot_config.py u LIVE_BOT_CONFIG:
 
-Ověř, že bot_name používá jen znaky [A-Za-z0-9._-] (jinak se sanitizuje).
+  bot_name = "<BOT_NAME>"       ← přesně stejný string jako BOT_ID
+  magic = <unikátní číslo>
 
-Doporučený vzor pojmenování: SYMBOL_BROKER_N (např. XAUUSD_FXIFY_2, EU50_Fintokey_1).
+Doporučený vzor: <pořadí>_<SYMBOL>_<velikost>_n=<N>_<BROKER>
+Příklad: 3_EURUSD_100k_n=2_FTMO
 
 
-3) Vytvoř / uprav .env.sync
----------------------------
+================================================================================
+KROK 4 — .env.sync
+================================================================================
 
-Zkopíruj .env.sync.example → .env.sync a vyplň (Windows cesty, absolutní):
+Zkopíruj .env.sync.example → .env.sync (NEcommitovat do gitu bota):
 
   SOURCE_JSONL_PATH=<BOT_PROJECT_PATH>\<BOT_NAME>.jsonl
   SOURCE_CONFIG_JSONL_PATH=<BOT_PROJECT_PATH>\<BOT_NAME>_config.jsonl
   TELEMETRY_REPO_PATH=<TELEMETRY_REPO_PATH>
+  TELEMETRY_GIT_REMOTE=git@github.com:kalsow123/bot-telemetry.git
   BOT_ID=<BOT_NAME>
   TARGET_BRANCH=main
   SYNC_INTERVAL_SEC=1
   SYNC_POLL_SEC=0.5
   SYNC_CONFIG_JSONL_INTERVAL_SEC=0
 
-Poznámky:
-- SYNC_POLL_SEC=0.5 = kontrola změn každých 0.5 s (rychlý push po novém řádku)
-- SYNC_CONFIG_JSONL_INTERVAL_SEC=0 = config se kontroluje při každém pollu (doporučeno)
+POZOR: TELEMETRY_GIT_REMOTE musí být SSH URL (git@github.com:...), NE https://...
 
 
-4) Připrav telemetry git repo na serveru
-----------------------------------------
+================================================================================
+KROK 5 — TEST SYNCU A PUSH
+================================================================================
 
-Pokud TELEMETRY_REPO_PATH neexistuje:
-
-  git clone git@github.com:kalsow123/bot-telemetry.git "<TELEMETRY_REPO_PATH>"
-
-Ověř SSH push:
-
-  cd "<TELEMETRY_REPO_PATH>"
-  git remote -v
-  git pull origin main
-  git status
-
-Pokud push selže → nastav SSH klíč pro GitHub (deploy key nebo user key s write access).
-
-Na jednom serveru stačí JEDEN clone bot-telemetry pro všechny boty.
-Každý bot má vlastní .env.sync s jiným BOT_ID a SOURCE_* cestami.
-
-
-5) Vytvoř cílovou složku v telemetry repu (volitelné — sync ji vytvoří sám)
-----------------------------------------------------------------------------
-
-  New-Item -ItemType Directory -Force -Path "<TELEMETRY_REPO_PATH>\logs\<BOT_ID>"
-
-Finální struktura po prvním syncu:
-
-  logs/<BOT_ID>/live_bot.jsonl
-  logs/<BOT_ID>/bot_config.jsonl
-
-
-6) Ověř generování JSONL (bez gitu)
------------------------------------
-
-Spusť bota krátce nebo proveď test sync jednorázově:
-
-  cd "<BOT_PROJECT_PATH>"
-  .\.venv\Scripts\python.exe -m main
-  # nebo pokud .venv neexistuje: python -m main
-  # Ctrl+C po pár sekundách
-
-Zkontroluj, že existují:
-- <BOT_PROJECT_PATH>\<BOT_NAME>.jsonl (obsahuje eventy BOT_START, HEARTBEAT, STATUS, …)
-- <BOT_PROJECT_PATH>\<BOT_NAME>_config.jsonl (1 řádek, event: BOT_CONFIG_SNAPSHOT)
-
-Jednorázový sync test:
+Jednorázový test (po SSH ověření):
 
   cd "<BOT_PROJECT_PATH>"
   .\.venv\Scripts\python.exe scripts\sync_live_jsonl_to_github.py --env-file .env.sync --once
 
-Očekávaný výstup: [sync] Pushed: ... nebo tichý průchod pokud nebyla změna.
+Očekávaný výstup obsahuje:
+  [sync] Lock:   <TELEMETRY_REPO_PATH>\.telemetry_sync.lock
+  [sync] Pushed: YYYY-MM-DD HH:MM:SS        (pokud byla změna v jsonl)
 
+Ověř na GitHubu:
+  https://github.com/kalsow123/bot-telemetry/tree/main/logs/<BOT_ID>
 
-7) Ověř push do GitHubu
------------------------
+  logs/<BOT_ID>/live_bot.jsonl
+  logs/<BOT_ID>/bot_config.jsonl
+
+Lokálně:
 
   cd "<TELEMETRY_REPO_PATH>"
   git log -1 --oneline
-  # očekává se commit: "telemetry: <BOT_ID> update YYYY-MM-DD HH:MM:SS"
-
-  Test-Path "logs\<BOT_ID>\live_bot.jsonl"
-  Test-Path "logs\<BOT_ID>\bot_config.jsonl"
+  git log -1 --oneline origin/main
+  # obojí by mělo ukazovat: telemetry: <BOT_ID> update ...
 
 
-8) Ověř autostart syncu při běhu bota
--------------------------------------
+================================================================================
+KROK 6 — AUTOSTART A RESTART BOTA
+================================================================================
 
-Spusť bota normálně:
+Spuštění / restart:
 
   cd "<BOT_PROJECT_PATH>"
-  .\.venv\Scripts\python.exe -m main
+  .\scripts\restart_bot.ps1
 
-V live_bot.log hledej řádek:
+Nebo ručně na pozadí:
+
+  Start-Process -FilePath ".\.venv\Scripts\python.exe" `
+    -ArgumentList @("-u","-m","main") `
+    -WorkingDirectory "<BOT_PROJECT_PATH>" `
+    -WindowStyle Hidden
+
+V logu bota hledej:
   TELEMETRY_SYNC: spuštěn podproces PID=...
 
-Po ~30 s ověř nový commit v telemetry repu.
+Po ~30 s ověř nový commit v telemetry repu na GitHubu.
 
 
 ================================================================================
-FORMÁT DAT (dashboard očekává tento schema)
+FORMÁT DAT (dashboard)
 ================================================================================
 
---- Live JSONL (<BOT_NAME>.jsonl → live_bot.jsonl) ---
+Lokálně:
+  <BOT_NAME>.jsonl           → append-only live eventy
+  <BOT_NAME>_config.jsonl    → 1 řádek BOT_CONFIG_SNAPSHOT při startu
 
-Každý řádek = 1 JSON objekt. Klíčové eventy:
-- BOT_START, BOT_STOP (reason: MANUAL_STOP / CRASH / SHUTDOWN / …)
-- HEARTBEAT (každé ~3 min, pole uptime_sec)
-- STATUS (balance, equity, profit_total, profit_bot, open_positions, pending_orders, …)
-- OLD_WAVES_SUMMARY
-- MT5_DISCONNECTED, MT5_RECONNECTED, MT5_CONNECTION
-- obchodní eventy z trade trackeru (ORDER_*, POSITION_*, TRADE_*)
-- LOG (fallback pro plain log.info)
-
-Povinná pole u strukturovaných eventů (z log_event()):
-  ts_iso, severity, event, bot_id, bot_instance_id, symbol, tf, magic,
-  vps_name, event_id, schema_version
-
-
---- Config JSONL (<BOT_NAME>_config.jsonl → bot_config.jsonl) ---
-
-Přesně 1 řádek při startu:
-
-  {
-    "ts_iso": "...",
-    "event": "BOT_CONFIG_SNAPSHOT",
-    "bot_name": "<BOT_NAME>",
-    "magic": ...,
-    "symbol": "...",
-    "timeframe": "M30",
-    "settings": { ... celý BotConfig ... }
-  }
+V GitHub repu (sync přejmenuje):
+  logs/<BOT_ID>/live_bot.jsonl
+  logs/<BOT_ID>/bot_config.jsonl
 
 
 ================================================================================
 CHECKLIST PO DOKONČENÍ
 ================================================================================
 
-[ ] bot_name v config/bot_config.py == BOT_ID v .env.sync
-[ ] magic je unikátní oproti ostatním botům
-[ ] .env.sync existuje s absolutními cestami pro daný server
-[ ] TELEMETRY_REPO_PATH je git clone s funkčním SSH pushem
-[ ] Lokální <BOT_NAME>.jsonl a <BOT_NAME>_config.jsonl se vytváří při startu
-[ ] sync_live_jsonl_to_github.py --once úspěšně pushne
-[ ] V GitHub repu bot-telemetry existuje logs/<BOT_ID>/live_bot.jsonl
-[ ] V GitHub repu existuje logs/<BOT_ID>/bot_config.jsonl
-[ ] Při běhu bota se v logu objeví TELEMETRY_SYNC: spuštěn podproces
-[ ] Dashboard zobrazuje nového bota (po refresh / dalším pullu dat)
+[ ] SSH klíč vytvořen na VPS (~/.ssh/id_ed25519)
+[ ] Veřejný klíč přidán na GitHub (Title = <VPS_PUBLIC_IP> bot-telemetry)
+[ ] ssh -T git@github.com funguje
+[ ] bot-telemetry clone: remote = git@github.com:kalsow123/bot-telemetry.git
+[ ] core.sshCommand nastaven v bot-telemetry repu
+[ ] bot_name v config == BOT_ID v .env.sync
+[ ] .env.sync existuje, TELEMETRY_GIT_REMOTE je SSH (ne HTTPS)
+[ ] sync --once → [sync] Pushed (nebo bez chyby pokud bez změny)
+[ ] GitHub: logs/<BOT_ID>/live_bot.jsonl existuje a je aktuální
+[ ] Při běhu bota TELEMETRY_SYNC podproces běží
+[ ] Okno „Connect to GitHub“ se NEobjevuje
 
 
 ================================================================================
 TROUBLESHOOTING
 ================================================================================
 
-Problém                              | Řešení
--------------------------------------|-----------------------------------------------
-TELEMETRY_SYNC: .env.sync chybí       | Vytvoř .env.sync z .env.sync.example
-git push selhal                      | SSH klíč, git pull, konflikty v telemetry repu
-JSONL se nevytváří                   | Bot neběží / chyba MT5 connect / špatný bot_name
-Push proběhne, dashboard nevidí bota | BOT_ID nesedí se jménem složky v logs/
-Duplicitní instance                  | Lock .locks/<bot>_<magic>.lock — ukonči starý proces
-Sync neběží na pozadí                | Spusť ručně: .\scripts\run_sync_live_jsonl.ps1
+Problém                                    | Řešení
+-------------------------------------------|------------------------------------------
+Okno „Connect to GitHub“                   | Remote je HTTPS → přepni na SSH (krok 1)
+Permission denied (publickey)              | Klíč není na GitHubu → krok 0e
+git push HTTP 401                          | HTTPS místo SSH → přepni remote
+cannot pull with rebase: unstaged changes   | Starý sync skript → aktualizuj z FTMO_100k
+cannot lock ref refs/heads/main            | Kolize push více botů → sdílený lock + retry
+Author identity unknown                    | Aktualizuj sync skript (git identity env)
+bot-telemetry diverged / nepushuje         | fetch + reset --hard origin/main, pak sync
+Sync neběží                                | restart bota, zkontroluj .env.sync
+Dashboard nevidí bota                      | BOT_ID ≠ název složky v logs/
 
 
 ================================================================================
-DŮLEŽITÉ OMEZENÍ
-================================================================================
-
-- *.jsonl soubory jsou v .gitignore bota — do gitu bota se necommitují, jen do bot-telemetry.
-- .env.sync drž lokálně na serveru (obsahuje cesty, necommitovat do veřejného repa bota).
-- NESMÍŠ měnit cílové názvy v telemetry repu — dashboard očekává vždy live_bot.jsonl
-  a bot_config.jsonl (NE <BOT_NAME>.jsonl v gitu).
-- Každý bot = vlastní složka logs/<BOT_ID>/ v repu bot-telemetry.
-- Starší ruční setup (např. EU50_Fintokey_1.jsonl místo live_bot.jsonl v gitu) nepoužívej —
-  vždy používej sync skript.
-
-
-================================================================================
-REFERENCE — FUNGUJÍCÍ XAUUSD_FXIFY_2
+REFERENCE — FUNGUJÍCÍ 3_EURUSD_100k_n=2_FTMO
 ================================================================================
 
 Lokální .env.sync:
 
-  SOURCE_JSONL_PATH=C:\Users\Administrator\Desktop\Standa_trading_testing_2\XAUUSD_Trading_BOT_FXIFY_2\XAUUSD_FXIFY_2.jsonl
-  SOURCE_CONFIG_JSONL_PATH=C:\Users\Administrator\Desktop\Standa_trading_testing_2\XAUUSD_Trading_BOT_FXIFY_2\XAUUSD_FXIFY_2_config.jsonl
+  SOURCE_JSONL_PATH=C:\Trading_bots\FTMO_100k\3_EURUSD_100k_n=2_FTMO.jsonl
+  SOURCE_CONFIG_JSONL_PATH=C:\Trading_bots\FTMO_100k\3_EURUSD_100k_n=2_FTMO_config.jsonl
   TELEMETRY_REPO_PATH=C:\Users\Administrator\Desktop\bot-telemetry
-  BOT_ID=XAUUSD_FXIFY_2
+  TELEMETRY_GIT_REMOTE=git@github.com:kalsow123/bot-telemetry.git
+  BOT_ID=3_EURUSD_100k_n=2_FTMO
 
 GitHub cíl:
 
-  logs/XAUUSD_FXIFY_2/live_bot.jsonl
-  logs/XAUUSD_FXIFY_2/bot_config.jsonl
+  https://github.com/kalsow123/bot-telemetry/tree/main/logs/3_EURUSD_100k_n=2_FTMO
+  logs/3_EURUSD_100k_n=2_FTMO/live_bot.jsonl
+  logs/3_EURUSD_100k_n=2_FTMO/bot_config.jsonl
 
 config/bot_config.py:
 
-  bot_name = "XAUUSD_FXIFY_2"
-  magic = 200_002
+  bot_name = "3_EURUSD_100k_n=2_FTMO"
 
 
 ================================================================================
-ÚKOL PRO CURSOR
+ÚKOL PRO CURSOR — SHRNUTÍ WORKFLOW
 ================================================================================
 
-Proveď všechny kroky výše pro bota s hodnotami z sekce KONTEXT.
-Ověř funkčnost příkazy v PowerShellu.
+Proveď v tomto pořadí:
+
+  1. Doplň KONTEXT (BOT_PROJECT_PATH, BOT_NAME, VPS_PUBLIC_IP, …)
+  2. SSH klíč — vytvoř / ověř, ukaž uživateli co vložit na GitHub (Title = IP)
+  3. Počkej na potvrzení uživatele že klíč je na GitHubu (nebo ověř ssh -T)
+  4. Nastav / ověř bot-telemetry clone (SSH remote + core.sshCommand)
+  5. Nastav bot_name, .env.sync
+  6. sync --once → ověř push na GitHub
+  7. Restart bota
+  8. Report: poslední commit, URL logs/<BOT_ID>/, potvrzení že SSH okno nevzniká
+
 Na závěr napiš stručný report:
-- co bylo vytvořeno/změněno,
-- výstup test syncu (--once),
-- poslední git commit v telemetry repu,
-- potvrzení že dashboard uvidí bota pod logs/<BOT_ID>/.
+- VPS IP a název SSH klíče na GitHubu
+- co bylo vytvořeno/změněno
+- výstup ssh -T a sync --once
+- poslední git commit v telemetry repu (hash + message)
+- URL logs/<BOT_ID>/ na GitHubu
 
 ================================================================================
