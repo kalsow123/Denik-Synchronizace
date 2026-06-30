@@ -6,6 +6,7 @@ WAVE_TARGET_N/G extension catch-up a vstupy vln narozených na tomto baru.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional, Set
@@ -13,6 +14,8 @@ from typing import Any, Callable, Dict, Optional, Set
 import pandas as pd
 
 from config.bot_config import BotConfig
+
+log = logging.getLogger(__name__)
 
 def replay_two_sided_tracker_live_parity(
     tracker: Any,
@@ -50,6 +53,7 @@ def replay_two_sided_tracker_live_parity(
             )
 
 from config.enums import PendingCancelMode as PCM
+from core.logging_utils import log_event
 from core.signal_keys import get_signal_key
 from infra.orders import (
     cancel_pendings_by_direction,
@@ -64,6 +68,7 @@ from strategy.trend_bos import (
     find_close_bos_flip_for_target_since,
     tp_mode_uses_bos_per_bar_exit,
     wave_allowed_for_entry,
+    _wave_is_wf_origin,
 )
 from strategy.wave_target_n_mode import is_wave_target_n_family
 
@@ -96,6 +101,170 @@ _TRACE_LOG: list = []
 def _trace(wt, bar_idx, branch: str, **kw) -> None:
     if str(wt) in _TRACE_WAVES:
         _TRACE_LOG.append((int(bar_idx), str(wt), branch, kw))
+
+
+def _attempt_live_bos_retro_entry(
+    *,
+    cfg: BotConfig,
+    wave: dict,
+    last_bar_idx: int,
+    last_bar_time: datetime,
+    wave_birth_by_time: dict,
+    bos_flip_map: dict[int, str],
+    sent_signals: Set[str],
+    failed_signals: Dict[str, Dict[str, Any]],
+    retro_bos_attempted: Set[str],
+    signal_digits: int,
+    entries_allowed: bool,
+    fill_trend_state: Any,
+    ext_sl_anchor: Optional[dict],
+    seq_info: dict,
+    waves: list,
+    bar_close: float | None = None,
+) -> tuple[bool, Optional[dict]]:
+    """
+    BOS retro aktivace na close-based flip baru — parita engine
+    `_bos_flip_wave_by_bar` + `_process_new_wave(bypass_trend_filter=True)`.
+
+    Přesunuto z `runtime.live_loop` v akci 2F (tenký live_loop bez send_order).
+    Jediný zbývající konzument je tento modul (missed_bar_replay), který se maže
+    v akci 2G; live-only helpery (`_wave_birth_bar_index`, `_bos_flip_bar_for_wave`,
+    `_try_live_counter_only_on_wave`, `_maybe_place_live_counter_from_tp`) zůstávají
+    v live_loop a volají se přes `_ll.` (function-local import kvůli cyklu).
+
+    Same-bar birth+flip resi hlavni wave loop (trend filter retro bypass).
+    """
+    from runtime import live_loop as _ll
+
+    wt = str(wave.get("wave_time", "") or "")
+    if not wt or wt in retro_bos_attempted:
+        _trace(wt, last_bar_idx, "retro:already_attempted_or_empty")
+        return False, ext_sl_anchor
+
+    birth = _ll._wave_birth_bar_index(wt, wave_birth_by_time)
+    if birth is None or birth >= int(last_bar_idx):
+        _trace(wt, last_bar_idx, "retro:birth_ge_bar", birth=birth)
+        return False, ext_sl_anchor
+
+    flip_bar = _ll._bos_flip_bar_for_wave(wt, bos_flip_map)
+    if flip_bar is None or int(flip_bar) != int(last_bar_idx):
+        _trace(wt, last_bar_idx, "retro:not_flip_bar", flip_bar=flip_bar)
+        return False, ext_sl_anchor
+
+    if _wave_is_wf_origin(wave):
+        _trace(wt, last_bar_idx, "retro:wf_origin")
+        return False, ext_sl_anchor
+
+    sig_key = get_signal_key(wave, digits=signal_digits)
+    if sig_key in sent_signals:
+        _trace(wt, last_bar_idx, "retro:already_sent")
+        retro_bos_attempted.add(wt)
+        return False, ext_sl_anchor
+
+    retro_bos_attempted.add(wt)
+
+    if bool(wave.get("post_ext_trend_suppressed", False)):
+        _trace(wt, last_bar_idx, "retro:post_ext_suppressed")
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if is_wave_too_old(wt, cfg, ref_time=last_bar_time):
+        _trace(wt, last_bar_idx, "retro:too_old", flip_bar=flip_bar, birth=birth)
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if not is_wave_in_allowed_session(wt, cfg):
+        _trace(wt, last_bar_idx, "retro:session")
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if is_wave_too_large(wave["move_pct"], cfg, is_ext=is_ext_wave(wave, cfg)):
+        _trace(wt, last_bar_idx, "retro:too_large")
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    if not bool(getattr(cfg, "wave_position_enabled", True)):
+        if _ll._try_live_counter_only_on_wave(
+            cfg=cfg,
+            wave=wave,
+            seq_info=seq_info,
+            all_waves=waves,
+            entries_allowed=entries_allowed,
+            sent_signals=sent_signals,
+            sig_key=sig_key,
+        ):
+            retro_bos_attempted.add(wt)
+            return False, ext_sl_anchor
+        sent_signals.add(sig_key)
+        retro_bos_attempted.add(wt)
+        return False, ext_sl_anchor
+
+    if not entries_allowed:
+        _ll._log_adx14_entry_blocked(cfg, entry_type="WAVE_BOS_RETRO", wave_id=wt)
+        sent_signals.add(sig_key)
+        return False, ext_sl_anchor
+
+    wave_order = wave
+    if is_ext_wave(wave, cfg):
+        ext_sl_anchor = wave
+    else:
+        wave_order, ext_sl_anchor = apply_first_opposite_wave_sl_after_ext(
+            wave,
+            ext_anchor=ext_sl_anchor,
+            cfg=cfg,
+        )
+
+    log.info(
+        f"BOS RETRO VLNA | {'BUY' if wave_order['dir'] == 1 else 'SELL'} "
+        f"EP={wave_order['fib50']:.5f} SL={wave_order['sl']:.5f} "
+        f"TP={wave_order['tp']:.5f} | Wave {wave_order['move_pct']:.2f}% | {wt}"
+    )
+    log_event(
+        cfg,
+        "info",
+        "WAVE_BOS_RETRO_ENTRY",
+        wave_id=wt,
+        flip_bar=int(flip_bar),
+        birth_bar=int(birth),
+    )
+
+    placed_meta: Dict[str, Any] = {}
+    if send_order(
+        wave_order,
+        cfg,
+        entry_mode=cfg.entry_mode,
+        placed_meta=placed_meta,
+        trend_state_at_fill=fill_trend_state,
+        bypass_trend_filter=True,
+        bar_close=bar_close,
+    ):
+        _ll._maybe_place_live_counter_from_tp(
+            cfg=cfg,
+            wave=wave_order,
+            seq_info=seq_info,
+            tp_price=placed_meta.get("tp_price"),
+            all_waves=waves,
+            entries_allowed=entries_allowed,
+        )
+        _trace(wt, last_bar_idx, "retro:SENT")
+        sent_signals.add(sig_key)
+        failed_signals.pop(sig_key, None)
+        return True, ext_sl_anchor
+
+    _trace(wt, last_bar_idx, "retro:send_failed")
+    prev = failed_signals.get(sig_key, {"wave": wave_order, "attempts": 0})
+    prev["wave"] = wave_order
+    prev["attempts"] = int(prev.get("attempts", 0)) + 1
+    failed_signals[sig_key] = prev
+    log_event(
+        cfg,
+        "warning",
+        "WAVE_BOS_RETRO_FAILED",
+        wave_id=wt,
+        flip_bar=int(flip_bar),
+        attempts=int(prev["attempts"]),
+    )
+    return False, ext_sl_anchor
 
 
 def new_closed_bar_indices(
@@ -360,7 +529,7 @@ def replay_missed_closed_bar(
         if _retro_wt:
             _retro_wave = find_wave_by_time(waves, _retro_wt)
             if _retro_wave is not None:
-                _sent, state.ext_sl_anchor = _ll._attempt_live_bos_retro_entry(
+                _sent, state.ext_sl_anchor = _attempt_live_bos_retro_entry(
                     cfg=cfg,
                     wave=_retro_wave,
                     last_bar_idx=bar_idx,
