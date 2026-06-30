@@ -1634,6 +1634,146 @@ def _close_mt5_position_market(
     return False
 
 
+# ─── 2E: tenke single-ticket wrappery (LiveExecutor pass-through) ───────────
+# LiveExecutor mapuje per-trade rozhodnuti enginu na konkretni MT5 ticket.
+# Vsechny vraci rychle (None / False) kdyz MT5 nic nevrati — NIKDY neblokuji.
+# Filling / retcode retry zustava uvnitr (`_send_request`), NE v executoru.
+
+def find_bot_position_by_comment(cfg: BotConfig, comment: str):
+    """Najde otevrenou MT5 pozici tohoto bota podle (magic + presny comment).
+
+    Vraci position objekt nebo None (vc. pripadu, kdy MT5 nic nevrati)."""
+    positions = mt5.positions_get(symbol=cfg.symbol)
+    if not positions:
+        return None
+    want = str(comment or "")
+    for p in positions:
+        if int(getattr(p, "magic", -1)) != int(cfg.magic):
+            continue
+        if str(getattr(p, "comment", "") or "") == want:
+            return p
+    return None
+
+
+def find_bot_pending_by_comment(cfg: BotConfig, comment: str):
+    """Najde MT5 pending order tohoto bota podle (magic + presny comment)."""
+    orders = mt5.orders_get(symbol=cfg.symbol)
+    if not orders:
+        return None
+    want = str(comment or "")
+    for o in orders:
+        if int(getattr(o, "magic", -1)) != int(cfg.magic):
+            continue
+        if str(getattr(o, "comment", "") or "") == want:
+            return o
+    return None
+
+
+def cancel_pending_order(cfg: BotConfig, ticket: int) -> bool:
+    """MT5 `order_delete` (TRADE_ACTION_REMOVE) pro jeden pending ticket."""
+    req = {"action": mt5.TRADE_ACTION_REMOVE, "order": int(ticket)}
+    result = _send_request(req, "CANCEL_PENDING", cfg)
+    if result is None:
+        log.warning(f"CANCEL_PENDING: zadna odpoved pro #{ticket} | {mt5.last_error()}")
+        return False
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        log.info(f"CANCEL_PENDING: zrusen pending #{ticket}")
+        return True
+    log.warning(f"CANCEL_PENDING: #{ticket} retcode={result.retcode} | {result.comment}")
+    return False
+
+
+def modify_position_sltp(
+    cfg: BotConfig,
+    p,
+    *,
+    sl: float | None = None,
+    tp: float | None = None,
+    digits: int | None = None,
+) -> bool:
+    """MT5 `TRADE_ACTION_SLTP` na jedne pozici.
+
+    sl=None → drzi stavajici SL pozice; tp=None → vymaze fixed TP (0.0 = bez TP,
+    pouziva se pri TS2 promote / two-sided TP clear)."""
+    if digits is None:
+        digits = _price_digits(mt5.symbol_info(cfg.symbol))
+    cur_sl = float(getattr(p, "sl", 0.0) or 0.0)
+    sl_val = cur_sl if sl is None else float(sl)
+    tp_val = 0.0 if tp is None else float(tp)
+    req = {
+        "action": mt5.TRADE_ACTION_SLTP,
+        "symbol": cfg.symbol,
+        "position": int(p.ticket),
+        "sl": _round_price(sl_val, digits),
+        "tp": _round_price(tp_val, digits) if tp is not None else 0.0,
+        "magic": int(cfg.magic),
+    }
+    result = _send_request(req, "MODIFY_SLTP", cfg)
+    if result is None:
+        log.warning(f"MODIFY_SLTP: zadna odpoved pro #{p.ticket} | {mt5.last_error()}")
+        return False
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        log.info(
+            f"MODIFY_SLTP: #{p.ticket} SL={sl_val:.5f} TP={_fmt_tp(None if tp is None else tp)}"
+        )
+        return True
+    log.warning(f"MODIFY_SLTP: #{p.ticket} retcode={result.retcode} | {result.comment}")
+    return False
+
+
+def close_position_partial_market(
+    cfg: BotConfig,
+    p,
+    volume: float,
+    *,
+    reason: str,
+    digits: int | None = None,
+) -> bool:
+    """Castecne zavre MT5 pozici marketem (volume <= p.volume).
+
+    volume >= p.volume → zavre celou pozici (deleguje na `_close_mt5_position_market`)."""
+    full = float(getattr(p, "volume", 0.0) or 0.0)
+    part = max(0.0, min(float(volume), full))
+    if part <= 0.0:
+        return False
+    if part >= full:
+        return _close_mt5_position_market(cfg, p, reason=reason, digits=digits)
+    if digits is None:
+        digits = _price_digits(mt5.symbol_info(cfg.symbol))
+    tick = mt5.symbol_info_tick(cfg.symbol)
+    if tick is None:
+        log.warning(f"{reason}: partial close #{p.ticket} — chybi tick")
+        return False
+    if int(p.type) == int(getattr(mt5, "POSITION_TYPE_BUY", -1)):
+        close_type = mt5.ORDER_TYPE_SELL
+        price = tick.bid
+    else:
+        close_type = mt5.ORDER_TYPE_BUY
+        price = tick.ask
+    orig_comment = str(getattr(p, "comment", "") or "")
+    req = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": cfg.symbol,
+        "volume": part,
+        "type": close_type,
+        "position": int(p.ticket),
+        "price": _round_price(price, digits),
+        "deviation": 20,
+        "magic": int(cfg.magic),
+        "comment": f"{reason}_{orig_comment}"[:31],
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+    result = _send_request(req, reason, cfg)
+    if result is None:
+        log.warning(f"{reason}: partial close #{p.ticket} bez odpovedi")
+        return False
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        log.info(f"{reason}: partial close #{p.ticket} vol={part}/{full}")
+        return True
+    log.warning(f"{reason}: partial close #{p.ticket} retcode={result.retcode} | {result.comment}")
+    return False
+
+
 class _Mt5PositionTradeView:
     """Minimalni adapter MT5 pozice → should_close_trade_on_* helpery."""
 
