@@ -84,7 +84,8 @@ from strategy.wave_sequence import (
     propagate_seq_info_to_waves,
 )
 from backtest.sim_params import sim_params_from_grid_combo
-from backtest.data_loader import load_csv, filter_by_date_range, resolve_backtest_date_range
+from backtest.data_loader import filter_by_date_range, resolve_backtest_date_range
+from core.market_data import load_bars
 from backtest.stats import compute_stats, trades_to_df
 from backtest.file_stems import export_path_stem, prefixed_export_stem
 from backtest.report import (
@@ -139,7 +140,7 @@ def _load_data_for_config(cfg: BotConfig, csv_path: str | None,
     Vraci (df, eff_date_from, eff_date_to) — efektivni okno pro nazvy slozek atd.
     """
     if csv_path:
-        df = load_csv(csv_path)
+        df = load_bars(cfg, source="csv", path=Path(csv_path))
     else:
         tf_label = cfg.timeframe_label
         path = csv_path_for(cfg.symbol, tf_label)
@@ -149,7 +150,7 @@ def _load_data_for_config(cfg: BotConfig, csv_path: str | None,
                 f"Bud zadej --csv PATH, nebo nahraj CSV do: {get_data_dir()}/\n"
                 f"Pojmenovani: {cfg.symbol}_{tf_label}.csv"
             )
-        df = load_csv(path)
+        df = load_bars(cfg, source="csv", path=path)
 
     eff_from, eff_to = resolve_backtest_date_range(date_from, date_to, df)
     df = filter_by_date_range(df, eff_from, eff_to)
