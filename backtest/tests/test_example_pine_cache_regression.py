@@ -62,7 +62,10 @@ def _reset_caches():
 
 def test_example_all_combos_match_with_and_without_pine_cache():
     combos = generate_combinations(get_profile("EXAMPLE"))
-    assert len(combos) == 24
+    # EXAMPLE byl zamerne prepsan (commit f56800d) z 24-kombinacniho gridu na
+    # 4 explicitni VARIAC10 kombinace (combo_no 50, 53, 280, 207). Cache parita
+    # se overuje na techto 4 realnych deployment kombinacich.
+    assert len(combos) == 4
 
     set_pine_sim_cache_enabled(False)
     baseline = {i: _combo_fingerprint(c) for i, c in enumerate(combos)}

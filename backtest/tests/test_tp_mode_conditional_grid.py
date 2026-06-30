@@ -51,5 +51,8 @@ def test_bos_entry_sweep_not_rrr_fixed():
 
 def test_bot_optimalisation_combo_count_shrinks():
     combos = generate_combinations(get_profile("bot_optimalisation"))
-    # drive 31104; po podminenem gridu 8352 (rrr/tp_target/bos_entry + ext_close dedup)
-    assert len(combos) == 8352
+    # Aktualni bot_optimalisation grid: raw product 82944 (2^10 * 3^4); po
+    # podminenem gridu (rrr/tp_target/bos_entry/ext_close srazene dle tp_mode)
+    # + dedup => 16704. Dimenze gridu byly oproti puvodnimu navrhu rozsireny
+    # (zamerne, optimalizacni profil), proto je ocekavana hodnota 16704.
+    assert len(combos) == 16704
