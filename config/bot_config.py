@@ -99,6 +99,15 @@ TIMEFRAME_LABEL_MAP: dict = {v: k for k, v in TIMEFRAME_MAP.items()}
 # V gridu lze zadat "deep_retrace_shift_sl" nebo alias "shift_sl".
 ABORT_FIB_SHIFT_SL = "deep_retrace_shift_sl"
 
+# ───── BACKTEST DATA WINDOW (bot-wide) ──────────────────────────
+# Centralni okno pro VSECHNY backtesty/testing: posledni N let dostupnych dat
+# (odvozeno z posledniho timestampu datasetu, ne z dnesniho data).
+# Plati BOT-WIDE — backtest live_match/compare/grid i regresni golden/incremental
+# testy berou stejne okno z tohoto jednoho zdroje pravdy.
+# Override: env BACKTEST_WINDOW_YEARS, nebo CLI --date-from/--date-to (explicitni
+# datumy maji prednost pred timto defaultem).
+BACKTEST_WINDOW_YEARS: float = 2
+
 # ───── CONFIGURACE ──────────────────────────
 # Při přidání nového pole do BotConfig aktualizujte i HTML souhrn v backtestu:
 #   backtest/bot_config_summary_html.py (scroll export plots_scroll_combined).

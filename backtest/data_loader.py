@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -116,6 +117,71 @@ def load_from_mt5(symbol: str, timeframe_str: str, n_bars: int = 5000) -> pd.Dat
     df = pd.DataFrame(rates)
     df["time"] = pd.to_datetime(df["time"], unit="s")
     return df[["time", "open", "high", "low", "close", "tick_volume"]]
+
+    # ───── CENTRALNI 2-LETE OKNO (bot-wide) ─────────────────────────
+    # Jeden zdroj pravdy pro VSECHNY backtesty + regresni testy: posledni
+    # BACKTEST_WINDOW_YEARS let dostupnych dat, odvozene z posledniho timestampu
+    # datasetu (tj. "vzdy posledni 2 roky dostupnych dat", ne z dnesniho data).
+def _effective_backtest_window_years() -> float | None:
+    """Pocet let backtest okna: env BACKTEST_WINDOW_YEARS > config.BACKTEST_WINDOW_YEARS."""
+    raw = os.environ.get("BACKTEST_WINDOW_YEARS")
+    if raw is not None and str(raw).strip():
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    from config.bot_config import BACKTEST_WINDOW_YEARS
+
+    try:
+        return float(BACKTEST_WINDOW_YEARS)
+    except (TypeError, ValueError):
+        return None
+
+
+def _window_offset(years: float) -> pd.DateOffset | pd.Timedelta:
+    """DateOffset pro celociselne roky; necelou cast dopocita pres dny (365.25/rok)."""
+    whole = int(years)
+    frac = years - whole
+    off: pd.DateOffset | pd.Timedelta = pd.DateOffset(years=whole)
+    if frac:
+        off = off + pd.Timedelta(days=round(frac * 365.25))
+    return off
+
+
+def default_backtest_date_range(df: pd.DataFrame) -> tuple[str | None, str | None]:
+    """
+    Defaultni backtest okno = posledni BACKTEST_WINDOW_YEARS let DOSTUPNYCH dat.
+
+    Start se odvozuje z posledniho timestampu datasetu (df['time'].iloc[-1]),
+    konec = None (az do posledniho baru datasetu, inkluzivne). Vraci (date_from, date_to)
+    jako YYYY-MM-DD retezce (resp. None), kompatibilni s filter_by_date_range.
+    """
+    if df is None or len(df) == 0 or "time" not in getattr(df, "columns", []):
+        return None, None
+    years = _effective_backtest_window_years()
+    if years is None or years <= 0:
+        return None, None
+    last_ts = pd.Timestamp(df["time"].iloc[-1])
+    start_ts = last_ts - _window_offset(years)
+    return start_ts.strftime("%Y-%m-%d"), None
+
+
+def resolve_backtest_date_range(
+    date_from: str | None,
+    date_to: str | None,
+    df: pd.DataFrame,
+) -> tuple[str | None, str | None]:
+    """
+    Vrati efektivni (date_from, date_to) pro backtest.
+
+    Pokud uzivatel NEzadal ani date_from ani date_to, pouzije se centralni
+    default = posledni 2 roky dostupnych dat (default_backtest_date_range).
+    Explicitni datumy (CLI --date-from/--date-to, grid combo) maji prednost.
+    """
+    if date_from is None and date_to is None:
+        return default_backtest_date_range(df)
+    return date_from, date_to
+
 
     # Dataframe filtr (date_from / date_to)
 def filter_by_date_range(df: pd.DataFrame,

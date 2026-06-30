@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from backtest.data_loader import load_csv, filter_by_date_range
+from backtest.data_loader import load_csv, filter_by_date_range, resolve_backtest_date_range
 
 
 # Per-process cache (kazdy worker ma vlastni)
@@ -59,10 +59,6 @@ def load_data(symbol: str, timeframe_label: str,
     if bundle is not None and bundle.matches(symbol, timeframe_label, date_from, date_to):
         return bundle.get_dataframe()
 
-    filtered_key = (symbol, timeframe_label, date_from, date_to)
-    if filtered_key in _FILTERED_CACHE:
-        return _FILTERED_CACHE[filtered_key]
-
     key = (symbol, timeframe_label)
     if key not in _CACHE:
         path = csv_path_for(symbol, timeframe_label)
@@ -72,14 +68,21 @@ def load_data(symbol: str, timeframe_label: str,
                 f"Ocekavana cesta: {get_data_dir()}/{symbol}_{timeframe_label}.csv\n"
                 f"Lze prepsat env promennou BACKTEST_DATA_DIR."
             )
-        df = load_csv(path)
-        _CACHE[key] = df
+        _CACHE[key] = load_csv(path)
 
-    df = _CACHE[key]
-    if date_from or date_to:
-        df = filter_by_date_range(df.copy(), date_from, date_to)
+    full_df = _CACHE[key]
+    # Centralni 2-lete okno (bot-wide): kdyz nezadano date_from/date_to, ber
+    # posledni BACKTEST_WINDOW_YEARS let dostupnych dat (odvozeno z datasetu).
+    eff_from, eff_to = resolve_backtest_date_range(date_from, date_to, full_df)
+
+    filtered_key = (symbol, timeframe_label, eff_from, eff_to)
+    if filtered_key in _FILTERED_CACHE:
+        return _FILTERED_CACHE[filtered_key]
+
+    if eff_from or eff_to:
+        df = filter_by_date_range(full_df.copy(), eff_from, eff_to)
     else:
-        df = df.copy()
+        df = full_df.copy()
     _FILTERED_CACHE[filtered_key] = df
     return df
 

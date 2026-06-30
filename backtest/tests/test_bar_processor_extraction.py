@@ -3,35 +3,50 @@
 Overuje, ze presun tela `process_bar` z `BacktestEngine` do samostatneho
 `BarProcessor` je CISTY REFACTOR bez zmeny chovani:
   - `engine.run()` (ktery teď deleguje na BarProcessor) dava bit-identicke
-    closed_trades jako golden baseline (164 / +39040.88, fingerprint 226).
+    closed_trades jako golden baseline (na 2letem okne 751 / +279156.28,
+    fingerprint 1094).
   - cesta primo pres `BarProcessor.process_bar(...)` (stejny df, stejny
     BacktestExecutor) dava identickou sekvenci closed_trades jako `engine.run()`.
   - `BarProcessor` drzi referenci na engine (stav sdileny, ne kopirovany).
+
+Re-baseline na 2leté okno (BACKTEST_WINDOW_YEARS=2); dříve 6měsíční
+2025-11-10..2026-05-09 = 164/+39040.88 resp. 147/+38100.69 (fingerprint 226).
+Okno = posledni 2 roky odvozene z datasetu (EURUSD M30 2024-05-20 .. 2026-05-18).
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 from typing import List, Sequence, Tuple
 
 import pytest
 
+from backtest.data_loader import default_backtest_date_range, load_csv
 from backtest.engine import BacktestEngine, ClosedTrade
 from backtest.executor import BacktestExecutor
-from backtest.grid.data_cache import clear_cache, load_data
+from backtest.grid.data_cache import clear_cache, csv_path_for, load_data
 from backtest.stats import compute_stats, trades_to_df
 from backtest.wave_sim_cache import clear_pine_sim_cache
 from core.bar_processor import BarProcessor
 from config.bot_config import LIVE_BOT_CONFIG
 from config.position_modes import resolve_grid_engine_config
 
-DATE_FROM = "2025-11-10"
-DATE_TO = "2026-05-09"
+# Celý modul je pomalý (2letý backtest ~4–5 min) — gate ho pouští jen bez -m "not slow".
+pytestmark = pytest.mark.slow
 
-EXPECTED_TRADES_WAVE = 164
-EXPECTED_NET_PNL_WAVE_USD = 39040.88
-EXPECTED_CLOSED_TRADES_COUNT = 226
+
+@functools.lru_cache(maxsize=1)
+def _window() -> tuple[str | None, str | None]:
+    """Centralni 2-lete okno odvozene z datasetu (BACKTEST_WINDOW_YEARS)."""
+    df_full = load_csv(csv_path_for(LIVE_BOT_CONFIG.symbol, LIVE_BOT_CONFIG.timeframe_label))
+    return default_backtest_date_range(df_full)
+
+
+EXPECTED_TRADES_WAVE = 751
+EXPECTED_NET_PNL_WAVE_USD = 279156.28
+EXPECTED_CLOSED_TRADES_COUNT = 1094
 EXPECTED_CLOSED_TRADES_SHA256 = (
-    "43dc9bb77511943b7c3ba2a080e9a3df919ff109829a584fd50e3dbe62e5e0f6"
+    "ab3f64677da0b33f7a2d26d0a856621a866c9d3f0d3a8f237a9bf96188f95e7b"
 )
 
 ClosedTradeRow = Tuple[str, str, int, float, float, str, str]
@@ -61,10 +76,11 @@ def _closed_trades_fingerprint(trades: Sequence[ClosedTrade]) -> Tuple[str, int]
 
 
 def _make_cfg():
+    date_from, date_to = _window()
     return resolve_grid_engine_config(
         LIVE_BOT_CONFIG,
-        date_from=DATE_FROM,
-        date_to=DATE_TO,
+        date_from=date_from,
+        date_to=date_to,
     )
 
 
@@ -104,7 +120,8 @@ def test_engine_holds_bar_processor_by_reference():
 def test_engine_run_matches_golden_after_extraction():
     """run() (delegujici na BarProcessor) zustava bit-identicky s golden baseline."""
     cfg = _make_cfg()
-    df = load_data(cfg.symbol, cfg.timeframe_label, DATE_FROM, DATE_TO)
+    date_from, date_to = _window()
+    df = load_data(cfg.symbol, cfg.timeframe_label, date_from, date_to)
     assert not df.empty
 
     trades = BacktestEngine(cfg).run(df)
@@ -121,7 +138,8 @@ def test_engine_run_matches_golden_after_extraction():
 def test_bar_processor_path_equals_engine_run():
     """Primy beh pres BarProcessor.process_bar == engine.run() (stejne closed_trades)."""
     cfg = _make_cfg()
-    df = load_data(cfg.symbol, cfg.timeframe_label, DATE_FROM, DATE_TO)
+    date_from, date_to = _window()
+    df = load_data(cfg.symbol, cfg.timeframe_label, date_from, date_to)
 
     trades_run = BacktestEngine(cfg).run(df.copy())
     trades_processor = _run_via_bar_processor(df.copy())

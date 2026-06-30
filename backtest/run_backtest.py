@@ -84,7 +84,7 @@ from strategy.wave_sequence import (
     propagate_seq_info_to_waves,
 )
 from backtest.sim_params import sim_params_from_grid_combo
-from backtest.data_loader import load_csv, filter_by_date_range
+from backtest.data_loader import load_csv, filter_by_date_range, resolve_backtest_date_range
 from backtest.stats import compute_stats, trades_to_df
 from backtest.file_stems import export_path_stem, prefixed_export_stem
 from backtest.report import (
@@ -130,8 +130,14 @@ def _prep_grid_combos_for_paths(
 
 def _load_data_for_config(cfg: BotConfig, csv_path: str | None,
                           date_from: str | None,
-                          date_to: str | None) -> pd.DataFrame:
-    """Nacte data bud z explicitne zadaneho CSV, nebo z konvence data/{symbol}_{tf}.csv."""
+                          date_to: str | None) -> tuple[pd.DataFrame, str | None, str | None]:
+    """
+    Nacte data bud z explicitne zadaneho CSV, nebo z konvence data/{symbol}_{tf}.csv.
+
+    Pokud uzivatel nezadal date_from/date_to, pouzije se centralni 2-lete okno
+    (resolve_backtest_date_range → posledni BACKTEST_WINDOW_YEARS let dat).
+    Vraci (df, eff_date_from, eff_date_to) — efektivni okno pro nazvy slozek atd.
+    """
     if csv_path:
         df = load_csv(csv_path)
     else:
@@ -145,12 +151,13 @@ def _load_data_for_config(cfg: BotConfig, csv_path: str | None,
             )
         df = load_csv(path)
 
-    df = filter_by_date_range(df, date_from, date_to)
+    eff_from, eff_to = resolve_backtest_date_range(date_from, date_to, df)
+    df = filter_by_date_range(df, eff_from, eff_to)
     if df.empty:
         raise ValueError(
-            f"Prazdny DataFrame po filtraci. date_from={date_from} date_to={date_to}"
+            f"Prazdny DataFrame po filtraci. date_from={eff_from} date_to={eff_to}"
         )
-    return df
+    return df, eff_from, eff_to
 
 
 def _grid_export_periods(combo: dict, split_mode: str | None) -> list[tuple[str | None, str | None, str | None]]:
@@ -847,10 +854,19 @@ def run_single_mode(args) -> None:
     from backtest.profile_resolver import resolve_live_match_pair
 
     config_name = args.config or "LIVE_BOT_CONFIG"
-    cfg, combo = resolve_live_match_pair(
+    # Nejdriv nacti data a resolvni okno (default = posledni 2 roky), pak postav
+    # cfg/combo i vystupni slozku z REALNE pouziteho okna.
+    cfg0, _ = resolve_live_match_pair(
         config_name,
         date_from=args.date_from,
         date_to=args.date_to,
+        combo_no=1,
+    )
+    df, eff_from, eff_to = _load_data_for_config(cfg0, args.csv, args.date_from, args.date_to)
+    cfg, combo = resolve_live_match_pair(
+        config_name,
+        date_from=eff_from,
+        date_to=eff_to,
         combo_no=1,
     )
     output_dir = live_match_output_dir(
@@ -858,11 +874,10 @@ def run_single_mode(args) -> None:
         output_symbol_for_config(cfg),
         config_name=config_name,
         timeframe_label=cfg.timeframe_label,
-        date_from=args.date_from,
-        date_to=args.date_to,
+        date_from=eff_from,
+        date_to=eff_to,
     )
     print(f"\nVystupni adresar: {output_dir}\n")
-    df = _load_data_for_config(cfg, args.csv, args.date_from, args.date_to)
     print(f"Nacteno {len(df)} baru | {df['time'].iloc[0]} -> {df['time'].iloc[-1]}")
     _run_single_config(
         cfg,
@@ -890,7 +905,7 @@ def run_compare_mode(args) -> None:
 
     all_stats = {}
     for cfg in configs:
-        df = _load_data_for_config(cfg, args.csv, args.date_from, args.date_to)
+        df, _, _ = _load_data_for_config(cfg, args.csv, args.date_from, args.date_to)
         stats = _run_single_config(
             cfg, df, str(output_dir), args=args, combo_for_visual=None, test_pozice=None
         )
