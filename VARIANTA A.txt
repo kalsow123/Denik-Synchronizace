@@ -1,6 +1,18 @@
 ================================================================================
 LIVE BACKTEST CONNECT — MANUÁL (živý dokument)
 ================================================================================
+
+╔══════════════════════════════════════════════════════════╗
+║  KRITICKÉ PRAVIDLO — TESTOVACÍ OKNO = VŽDY 2 ROKY         ║
+╚══════════════════════════════════════════════════════════╝
+
+POVINNÉ TESTOVACÍ OKNO: Veškeré testování, backtesty, re-baseline, baseline čísla
+i jakákoli validace běží VŽDY na 2letém okně = poslední 2 roky dat
+(BACKTEST_WINDOW_YEARS = 2; ~2024-05-20 → 2026-05-18, ~24 775 barů EURUSD M30).
+NIKDY ne full-history a NIKDY ne jiné okno (např. dřívější 6měsíční
+2025-11-10..2026-05-09), pokud to uživatel VÝSLOVNĚ nezmění. Platí pro backtest
+i live a pro všechny budoucí kroky/akce.
+
 Repo:     Denik-Synchronizace (synchronizace)
 Datum:    2026-06-26 (aktualizace 2026-06-29)
 Účel:     Sjednocení live bota s backtesterem — jeden rozhodovací engine,
@@ -279,6 +291,7 @@ LiveExecutor — MT5 mechanika BEZ backtest ekvivalentu (musí se zachovat!):
 
 3.1 Akce 1A — GOLDEN REGRESE BASELINE
 -------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Účel: Zamknout dnešní výsledek backtesteru jako test PŘED jakoukoli změnou.
         Záchranná síť — když pozdější akce (1B–1D) něco rozbijí, test spadne.
 
@@ -315,6 +328,7 @@ LiveExecutor — MT5 mechanika BEZ backtest ekvivalentu (musí se zachovat!):
 
 3.2 Akce 1B — INKREMENTÁLNÍ DETEKTOR + PŘEPÍNAČ
 ------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
 Problém:
   Dnes engine volá run_pine_wave_simulation(celé df) jednou, pak post-process
   (wave_plus extend až ke konci řady, merge, wick cleanup) s vědomím budoucnosti.
@@ -372,6 +386,7 @@ Problém:
 
 3.3 Akce 1C — TESTY K 1B (birth-parita + coupling)
 --------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Spustit AŽ PO hotovém 1B (commit na varianta-a-faze-e).
 
   Test 1 — birth-parita:
@@ -385,6 +400,7 @@ Problém:
 
 3.4 Akce 1D — EXTRAKCE process_bar()
 ------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
 Cíl:
   engine.run(df) =
     prepare(df, wave_source)
@@ -420,6 +436,7 @@ Cíl:
 
 3.5 Akce 1E — TESTY K 1D (legacy==1A + gap-check)
 -------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Spustit AŽ PO hotovém 1D.
 
   Test 1: legacy regrese == baseline z akce 1A (closed_trades identické).
@@ -430,6 +447,7 @@ Cíl:
 
 3.6 Akce 1F — INCREMENTAL REFERENCE PnL + SNAPSHOT
 --------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Spustit AŽ PO hotovém 1D. Lze paralelně s 1E (vlna 4).
 
   Období:  2025-11-10 → 2026-05-09
@@ -449,6 +467,7 @@ Cíl:
 
 3.7 Akce 1G — VOLITELNÉ PŘED SPOJENÍM (zmenší gap ~2,5k)
 --------------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   [x] Exit timing BOS vs TP_WAVE_N — config-gated v engine (default OFF = golden)
   [x] Session parita — config-gated model pre-close cancel pendingů (default OFF)
   [x] Potvrdit produkční config:
@@ -628,6 +647,7 @@ Cíl:
 
 5.1 Akce 2A — BarProcessor + dual executor (core/ + executors/) [VOLITELNÉ]
 -----------------------------------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Účel:  Dosáhnout cílové architektury §1.5 — process_bar mimo BacktestEngine,
          sdílený BarProcessor, executors/BacktestExecutor + LiveExecutor.
 
@@ -667,6 +687,7 @@ Cíl:
 
 5.2 Akce 2B — Strangler: live volá process_bar() [HLAVNÍ]
 ---------------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Účel:  Nahradit duplicitní rozhodování v live_loop.py + missed_bar_replay.py
          jedním voláním BacktestEngine.process_bar() s IncrementalWaveSource.
 
@@ -745,6 +766,7 @@ Cíl:
 
 5.3 Akce 2C — Engine + MT5 adapter (spike / mezikrok) [NE DOPORUČENO]
 ----------------------------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Účel:  Rychlý POC: ověřit MT5 send_order pod jedním voláním bez full strangler.
 
   Co udělat (jen pokud uživatel trvá na 2C místo 2B):
@@ -767,6 +789,7 @@ Cíl:
 
 5.4 Akce 2D — Sjednocená datová vrstva load_bars(csv|mt5)
 ---------------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Účel:  Jedno API pro OHLC — backtest i live; centralizovat forming-bar pravidlo u MT5.
 
   Co udělat:
@@ -803,6 +826,7 @@ Cíl:
 
 5.5 Akce 2E — LiveExecutor (infra/orders → MT5)
 -------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Účel:  Implementovat Executor ABC pro live — process_bar rozhoduje, LiveExecutor provádí.
 
   Co udělat:
@@ -869,6 +893,7 @@ Cíl:
 
 5.6 Akce 2F — Tenký runtime/live_loop.py
 ----------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Účel:  live_loop = polling + session + IO; žádné strategické if/else.
 
   Co udělat:
@@ -919,6 +944,7 @@ Cíl:
 
 5.7 Akce 2G — Smazat runtime/missed_bar_replay.py
 ---------------------------------------------------
+  >> TESTOVACÍ OKNO: VŽDY 2 roky (BACKTEST_WINDOW_YEARS=2). Nikdy full-history.
   Účel:  Eliminovat duplicitní orchestrátor; catch-up = N× process_bar (§1.5).
 
   Co udělat:

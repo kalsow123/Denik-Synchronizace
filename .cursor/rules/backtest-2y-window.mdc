@@ -1,0 +1,24 @@
+---
+description: Povinne 2-lete testovaci/backtest okno (BACKTEST_WINDOW_YEARS=2)
+alwaysApply: true
+---
+
+# Povinné testovací okno — vždy 2 roky
+
+**POVINNÉ TESTOVACÍ OKNO:** Veškeré testování, backtesty, re-baseline, baseline čísla i jakákoli validace běží **VŽDY** na 2letém okně = poslední 2 roky dat (`BACKTEST_WINDOW_YEARS = 2`; ~2024-05-20 → 2026-05-18, ~24 775 barů EURUSD M30).
+
+**NIKDY** ne full-history a **NIKDY** ne jiné okno (např. dřívější 6měsíční 2025-11-10..2026-05-09), pokud to uživatel **VÝSLOVNĚ** nezmění.
+
+Platí pro backtest i live a pro všechny budoucí kroky/akce.
+
+## Konkrétní hodnoty
+
+- `BACKTEST_WINDOW_YEARS = 2`
+- Období: ~2024-05-20 → 2026-05-18
+- Data: ~24 775 barů EURUSD M30
+
+## Zakázáno bez výslovného pokynu uživatele
+
+- Full-history backtesty nebo validace
+- 6měsíční okno 2025-11-10..2026-05-09 nebo jakékoli jiné ad-hoc okno
+- Baseline čísla nebo re-baseline mimo 2leté okno
