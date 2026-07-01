@@ -252,6 +252,9 @@ PROFILES["EXAMPLE"] = {
             "timeframe": ["M30"],
             "causal_mode": [False],
             "run_e2e_parity": [False],
+            "relaxed_wave_box_enabled": [True],  # zapnuty profil B (vypnuty clamp_wave_box_to_bar
+            #  na vstupu WAVE) — schvaleno po 2letem DD auditu (+10 obchodu/+2738.51 USD,
+            #  DD beze zmeny vs STRICT); retro_bos blok zustava vzdy zapnuty
             "wave_min_pct": [0.2],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -329,6 +332,9 @@ PROFILES["EXAMPLE"] = {
             "timeframe": ["M30"],
             "causal_mode": [False],
             "run_e2e_parity": [False],
+            "relaxed_wave_box_enabled": [True],  # zapnuty profil B (vypnuty clamp_wave_box_to_bar
+            #  na vstupu WAVE) — schvaleno po 2letem DD auditu (+10 obchodu/+2738.51 USD,
+            #  DD beze zmeny vs STRICT); retro_bos blok zustava vzdy zapnuty
             "wave_min_pct": [0.2],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -406,6 +412,9 @@ PROFILES["EXAMPLE"] = {
             "timeframe": ["M30"],
             "causal_mode": [False],
             "run_e2e_parity": [False],
+            "relaxed_wave_box_enabled": [True],  # zapnuty profil B (vypnuty clamp_wave_box_to_bar
+            #  na vstupu WAVE) — schvaleno po 2letem DD auditu (+10 obchodu/+2738.51 USD,
+            #  DD beze zmeny vs STRICT); retro_bos blok zustava vzdy zapnuty
             "wave_min_pct": [0.23],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -483,6 +492,9 @@ PROFILES["EXAMPLE"] = {
             "timeframe": ["M30"],
             "causal_mode": [False],
             "run_e2e_parity": [False],
+            "relaxed_wave_box_enabled": [True],  # zapnuty profil B (vypnuty clamp_wave_box_to_bar
+            #  na vstupu WAVE) — schvaleno po 2letem DD auditu (+10 obchodu/+2738.51 USD,
+            #  DD beze zmeny vs STRICT); retro_bos blok zustava vzdy zapnuty
             "wave_min_pct": [0.2],
             "rrr": [2.5],
             "tp_mode": ["wave_target_n"],
@@ -565,6 +577,9 @@ PROFILES["testing"] = {
             "timeframe": ["M30"],
             "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
             "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
+            "relaxed_wave_box_enabled": [True],  # zapnuty profil B (vypnuty clamp_wave_box_to_bar
+            #  na vstupu WAVE) — schvaleno po 2letem DD auditu (+10 obchodu/+2738.51 USD,
+            #  DD beze zmeny vs STRICT); retro_bos blok zustava vzdy zapnuty
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": [0.26],
@@ -661,6 +676,9 @@ PROFILES["bot_optimalisation"] = {
             "timeframe": ["M30"],
             "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
             "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
+            "relaxed_wave_box_enabled": [True],  # zapnuty profil B (vypnuty clamp_wave_box_to_bar
+            #  na vstupu WAVE) — schvaleno po 2letem DD auditu (+10 obchodu/+2738.51 USD,
+            #  DD beze zmeny vs STRICT); retro_bos blok zustava vzdy zapnuty
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": [0.29],
@@ -785,6 +803,9 @@ PROFILES["positions_setting"] = {
             "timeframe": ["M30"],
             "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
             "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
+            "relaxed_wave_box_enabled": [True],  # zapnuty profil B (vypnuty clamp_wave_box_to_bar
+            #  na vstupu WAVE) — schvaleno po 2letem DD auditu (+10 obchodu/+2738.51 USD,
+            #  DD beze zmeny vs STRICT); retro_bos blok zustava vzdy zapnuty
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": [0.26],
@@ -879,6 +900,9 @@ PROFILES["full_grid"] = {
             "timeframe": ["M30"],
             "causal_mode": [False],  # True = backtest bez look-ahead (parita live)
             "run_e2e_parity": [False],  # True = po BT E2E parity (jen live_match, ne grid worker)
+            "relaxed_wave_box_enabled": [True],  # zapnuty profil B (vypnuty clamp_wave_box_to_bar
+            #  na vstupu WAVE) — schvaleno po 2letem DD auditu (+10 obchodu/+2738.51 USD,
+            #  DD beze zmeny vs STRICT); retro_bos blok zustava vzdy zapnuty
 
 # ============== TP SETTINGS ==============
             "wave_min_pct": arange(0.18, 0.34, 0.02),
