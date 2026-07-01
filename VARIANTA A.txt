@@ -525,12 +525,14 @@ Cíl:
 
   [x] 1A  Golden regrese: zamknout 164 / +39 041 USD
   [x] 1B  Inkrementální detektor (PineWaveDetector.advance — NOVÝ kód) + toggle
-  [ ] 1C  TEST: advance(i) birth == legacy birth; coupling incremental⇒causal
+  [x] 1C  TEST: advance(i) birth == legacy birth; coupling incremental⇒causal
+          (backtest/tests/test_1c_birth_parity.py — 6 testů; subset-parita
+           legacy ⊆ incremental, 0 birth mismatchů; commit 1ef00f3)
   [x] 1D  process_bar() extrakce + BacktestExecutor
   [x] 1E  TEST: legacy regrese == 1A baseline; executor protocol gap-check
   [x] 1F  Zapsat incremental referenční PnL do sekce 6 + snapshot test
   [x] 1G  Exit timing + session (volitelně) + TEST
-  [ ] ——— START FÁZE 2 (sekce 5) ———
+  [x] ——— START FÁZE 2 (sekce 5) — HOTOVA (DoD 5.9 = VŠE PASS) ———
 
 
 ================================================================================
@@ -1059,29 +1061,39 @@ Cíl:
 
 
 ================================================================================
-6. REFERENČNÍ METRIKY (doplňovat po akci 1F)
+6. REFERENČNÍ METRIKY
 ================================================================================
 
-  Legacy backtest (2025-11-10 .. 2026-05-09):
-    WAVE obchodů:  164
-    net PnL:       +39 041 USD
-    max DDi:       ~−6,14 %
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ AUTORITATIVNÍ OKNO = 2 ROKY (BACKTEST_WINDOW_YEARS=2)                   │
+  │ ~2024-05-20 → 2026-05-18, ~24 775 barů EURUSD M30.                      │
+  │ Toto jsou závazná referenční čísla; testy je assertují.                 │
+  └──────────────────────────────────────────────────────────────────────┘
 
-  Live var. C (§24, kauzální; historický kontext):
-    WAVE obchodů:  173
-    net PnL:       +36 557 USD
-    max DDi:       ~−6,69 %
-    Gap vs legacy: −2 484 USD (−6,4 %)
+  Legacy backtest (2 roky, non-causal precompute — grid baseline):
+    WAVE obchodů:  751
+    net PnL:       +279 156.28 USD
+    zdroj testu:   backtest/tests/test_legacy_golden_regression.py
 
-  Incremental engine (po akcích 1B–1F):
-    WAVE obchodů:  147
-    net PnL:       +38 101 USD
-    max DDi:       ~−8,61 %
+  Incremental engine (2 roky, incremental_causal — REFERENČNÍ PRAVDA pro live):
+    WAVE obchodů:  640
+    net PnL:       +124 461.68 USD
+    max DDi:       −10.34 %
+    zdroj testu:   backtest/tests/test_incremental_reference_snapshot.py
 
-  Po fázi 2 (cíl):
-    Decision parity (na backtesteru): legacy == incremental == process_bar
-    Execution: order params pass-through do infra/orders.
+  Výsledek fáze 2 (ověřeno finální DoD, sekce 5.9 — VŠE PASS):
+    Decision parity NA BACKTESTERU: incremental_causal process_bar loop
+      == engine.run(); legacy 1A/1E stále zelené (grid bez regrese).
+    Execution: LiveExecutor = pass-through order params do infra/orders (bez změny).
+    runtime/missed_bar_replay.py SMAZÁN; catch-up = N× process_bar.
+    Test gate: 643 passed, 0 nových failů vs baseline (16 pre-existujících).
     E2E se NEPOUŽÍVÁ.
+
+  ── Historický kontext (starší 6měsíční okno 2025-11-10 .. 2026-05-09, PŘED
+     přechodem na 2leté okno — jen informativně, NEpoužívat jako referenci) ──
+    Legacy:            164 obch. / +39 041 USD / ~−6,14 % DDi
+    Live var. C (§24): 173 obch. / +36 557 USD / ~−6,69 % DDi (gap −2 484 USD)
+    Incremental:       147 obch. / +38 101 USD / ~−8,61 % DDi
 
 
 ================================================================================
@@ -1143,6 +1155,12 @@ Cíl:
               2G + plný gate zbývají) + PROTOKOL finální DoD verifikace
               (Composer=testy / Opus 4.8=úpravy, kill Opus při loopu,
               fixy z finálního tasku NEcommitovat/NEpushovat, vždy 2leté okno).
+  2026-07-01  Fáze 2 dokončena a ověřena (DoD 5.9 = VŠE PASS): 2D-finish (load_bars
+              csv), grid combo-count fix, 2G (missed_bar_replay smazán). Sekce 6
+              (A6) dokončena — referenční metriky přepsány na autoritativní 2leté
+              okno (legacy 751/+279 156.28; incremental 640/+124 461.68/−10.34 %),
+              6měsíční čísla ponechána jen jako historický kontext. Akce 1C
+              (birth-parita advance==legacy + coupling) dodělávána.
 
 ================================================================================
 EOF
