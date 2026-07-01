@@ -101,6 +101,31 @@ class IncrementalWaveSource(WaveSource):
 
     `waves_at(i)` vraci vlny s birth == i (0..1 vlna). Volat sekvencne,
     vzestupne (stav se drzi inkrementalne, O(n)).
+
+    `burn_in_df` (window-shift bug fix, viz `scripts/_diag_window_shift_check.py`):
+    `PineWaveDetector` cold-seeduje pivot/cand stav z baru 0 svého vstupního `df`
+    s HARDCODED `pivot_dir=1` (viz `wave_detection_pine.run_pine_wave_simulation`,
+    initial_state==None větev). Pro FIXNÍ `df` (celý backtest) je to jen jeden
+    (byť arbitrární) seed bod na začátku historie — vlny o desítky/stovky barů
+    dál jsou už na něm prakticky nezávislé (stavový stroj "zapomene" seed).
+
+    ALE živý bot (`runtime.live_engine_session.LiveEngineSession.refresh_df_if_needed`)
+    dostává z MT5 ROLLING okno (posledních `cfg.startup_bars` barů) — s KAŽDÝM
+    novým barem se okno posune o 1, takže bar 0 (=seed bod) je JINÝ bar při
+    KAŽDÉM refreshi. Empiricky (diag skript) to i pro posun o 1 bar mění ~0.5 %
+    definic vln, s rozdíly hluboko (stovky barů) do okna — vlny už POUŽITÉ pro
+    vstup se retroaktivně překlasifikují jen kvůli posunu okna, ne kvůli nové
+    ceně. To je bug, ne genuine nová informace.
+
+    Fix: pokud je dodán `burn_in_df` (bary bezprostředně PŘED `df`, ze stejného
+    zdroje), detektor se cold-seeduje o `len(burn_in_df)` barů DŘÍV (na začátku
+    burn-in prefixu), takže do doby, kdy dojde na bar 0 volajícím viditelného
+    `df`, stavový stroj už seed „zapomněl“ (viz konvergenční hloubka v diag
+    skriptu — burn-in je zvolen s bezpečnou rezervou nad touto hloubkou).
+    Burn-in bary samotné se navenek NEVYSTAVUJÍ (`waves_at`/`birth_map`/
+    `all_waves`/ext mapy vrací jen bary/vlny s indexem >= 0 v `df`-relativní
+    číselné ose) — engine tedy dál pracuje jen s `df` (žádná změna replay
+    okna/rozhodovací historie), jen s KONVERGOVANÝM vstupním stavem detektoru.
     """
 
     def __init__(
@@ -110,31 +135,89 @@ class IncrementalWaveSource(WaveSource):
         *,
         start_bar: int = 1,
         initial_state: dict | None = None,
+        burn_in_df: pd.DataFrame | None = None,
     ) -> None:
         from strategy.wave_detection_pine import PineWaveDetector
 
         self.df = df
         self.cfg = cfg
+        self._burn_in_len = 0
+        wide_df = df
+        # initial_state (segmentovy WF resume) uz nese explicitni seed — burn-in
+        # by ho jen zbytecne prepocitaval (a posunul indexaci), proto se pouzije
+        # jen pri cold-startu (initial_state is None).
+        if burn_in_df is not None and len(burn_in_df) > 0 and initial_state is None:
+            wide_df = pd.concat(
+                [burn_in_df.reset_index(drop=True), df.reset_index(drop=True)],
+                ignore_index=True,
+            )
+            self._burn_in_len = len(burn_in_df)
         self._det = PineWaveDetector(
-            df, cfg, start_bar=start_bar, initial_state=initial_state
+            wide_df, cfg, start_bar=start_bar, initial_state=initial_state
         )
 
+    def _to_local_bar(self, wide_bar: int) -> int:
+        """Prevede bar index ve `wide_df` (burn-in + df) na index v `df`."""
+        return int(wide_bar) - self._burn_in_len
+
+    def _shift_wave(self, w: dict) -> dict:
+        if self._burn_in_len <= 0:
+            return w
+        shifted = dict(w)
+        for key in ("draw_left", "draw_right"):
+            if key in shifted:
+                shifted[key] = self._to_local_bar(shifted[key])
+        return shifted
+
     def waves_at(self, i: int) -> List[dict]:
-        return self._det.advance(i)
+        wide_i = int(i) + self._burn_in_len
+        born = self._det.advance(wide_i)
+        if not born:
+            return []
+        return [self._shift_wave(w) for w in born]
 
     def birth_map(self) -> Dict[str, int]:
-        return dict(self._det.birth)
+        if self._burn_in_len <= 0:
+            return dict(self._det.birth)
+        # Vlny narozene behem burn-in (mimo `df`) se navenek nevystavuji —
+        # patri jen ke konvergenci detektoru, ne k rozhodovaci historii `df`.
+        return {
+            wt: self._to_local_bar(b)
+            for wt, b in self._det.birth.items()
+            if b >= self._burn_in_len
+        }
 
     def all_waves(self) -> List[dict]:
-        return list(self._det._all_waves)
+        if self._burn_in_len <= 0:
+            return list(self._det._all_waves)
+        valid = self.birth_map()
+        return [
+            self._shift_wave(w)
+            for w in self._det._all_waves
+            if str(w.get("wave_time")) in valid
+        ]
 
     @property
     def ext_counter_suppress_from_bar(self) -> Dict[str, int]:
-        return dict(self._det.ext_counter_suppress_from_bar)
+        if self._burn_in_len <= 0:
+            return dict(self._det.ext_counter_suppress_from_bar)
+        valid = self.birth_map()
+        return {
+            wt: max(0, self._to_local_bar(b))
+            for wt, b in self._det.ext_counter_suppress_from_bar.items()
+            if wt in valid
+        }
 
     @property
     def ext_forming_first_bar(self) -> Dict[str, int]:
-        return dict(self._det.ext_forming_first_bar)
+        if self._burn_in_len <= 0:
+            return dict(self._det.ext_forming_first_bar)
+        valid = self.birth_map()
+        return {
+            wt: max(0, self._to_local_bar(b))
+            for wt, b in self._det.ext_forming_first_bar.items()
+            if wt in valid
+        }
 
 
 def make_wave_source(df: pd.DataFrame, cfg: BotConfig) -> WaveSource:

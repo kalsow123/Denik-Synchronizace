@@ -177,3 +177,30 @@ class PendingCancelMode(str, Enum):
 
     NUMBER = "number"
     TREND  = "trend"
+
+
+# ───── REŽIM ENGINE POUŽITÉHO V PRODUKČNÍM LIVE BĚHU (FÁZE 3, akce 3C) ────
+class LiveEngineUsage(str, Enum):
+    """
+    Ktery engine skutecne rozhoduje/bezi v produkcnim `run_live_loop()`.
+
+    PRESNE 2 stavy — oba jsou PLNOHODNOTNE povolene zive mody (zadny "OLD"
+    stav, ten byl zrusen — viz FAZE 3 — live_engine_usage E2E recovery.txt,
+    REVIZE 2026-07-01):
+
+    BACKTESTER (default)
+      - Live rozhoduje pres `BacktestEngine.process_bar()` (`LiveEngineSession`,
+        novy engine sdileny s backtesterem — VARIANTA A.txt §5.2/2F).
+      - Toto je dnesni produkcni chovani `runtime.live_loop.run_live_loop()`.
+
+    E2E
+      - Legacy engine: deleguje na `runtime.live_loop_legacy.run_live_loop()`
+        (zamrzla kopie stare implementace pred "2F: tenky live_loop"
+        refaktoringem — `_place_live_bos_reentry`, `_place_live_counter_from_g_extension`
+        a dalsi stare rozhodovaci funkce). Odpovida realnym zivym botum
+        bezicim MIMO tento repo na stare logice — NENI to jen offline
+        test harness.
+    """
+
+    BACKTESTER = "backtester"
+    E2E = "e2e"

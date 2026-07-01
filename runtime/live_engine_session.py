@@ -14,8 +14,10 @@ CÍL:
       vrací i nedokončený bar).
 
 FEATURE FLAG:
-  Volá se jen když `cfg.live_use_process_bar` je True. Default OFF → live_loop běží
-  PŘESNĚ jako dnes (žádná změna chování). Viz `runtime/live_loop.py` větvení.
+  Volá se jen když `cfg.live_engine_usage == LiveEngineUsage.BACKTESTER` (default,
+  viz `config/enums.py` a FAZE 3 — live_engine_usage E2E recovery.txt, akce 3C).
+  `LiveEngineUsage.E2E` deleguje místo toho na `runtime.live_loop_legacy.run_live_loop()`
+  (zamrzlá kopie staré implementace před "2F: tenký live_loop" refaktoringem).
 
 INKREMENTÁLNÍ VLNY (per-bar advance):
   Session si drží vlastní `IncrementalWaveSource` (PineWaveDetector.advance(i),
@@ -32,7 +34,7 @@ LIVE-ONLY KONTRAKT (zůstává v orchestraci live_loop / LiveExecutor, NE v proc
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -107,6 +109,38 @@ class LiveEngineSession:
 
     Cold start / reset = `prepare(df)` (zde v __init__). Mezi bary se rozhodnutí
     provádí přes `process_closed_bars()`.
+
+    LIFECYCLE (FÁZE 3, akce 3D — oprava P3/P4):
+      Session se vytváří JEDNOU při startu live loopu (viz `run_live_loop`
+      /`_run_live_loop_backtester`), NE při každém novém baru. `BacktestEngine.
+      prepare()` je NUTNĚ destruktivní (`.clear()` na `pending_orders`/
+      `open_trades`/`closed_trades`/`sent_signals`/`wave_birth_by_time`/...,
+      viz `backtest/engine.py`), takže vytvoření NOVÉ session (nebo zavolání
+      `prepare()` a zpracování jen posledního baru) při každém pollu ENGINE
+      OKAMŽITĚ ZAPOMÍNÁ celou historii (open trades / pendingy / sent_signals) —
+      to byl přesně P3 bug.
+
+      Oprava: `refresh_df_if_needed(df)` volá `prepare()` znovu JEN když se
+      opravdu objevil nový closed bar (MT5 vrací rolling okno `cfg.startup_bars`
+      barů, které se každým barem posouvá — indexy se tedy mezi cykly NEshodují
+      1:1 se starým oknem). Aby `prepare()`'s reset nezpůsobil ztrátu
+      nahromaděného stavu, `_run_live_loop_backtester` po každém
+      `refresh_df_if_needed` PŘEHRAJE CELÉ aktuální okno (`process_closed_bars(df,
+      range(1, len(df)))`), NE jen nové indexy — to je deterministický,
+      bit-identický ekvivalent dávkového (batch) zpracování aktuálního okna
+      (parita ověřená `tests/test_live_catch_up_parity.py` a
+      `tests/test_live_persistent_session_parity.py`), takže `engine.sent_signals`
+      / `open_trades` / `pending_orders` na konci každého cyklu odpovídají PLNÉ
+      historii okna — ne prázdnému stavu po jednom baru. Skutečné duplicitní
+      MT5 volání (opětovné odeslání již odeslaného orderu) blokuje
+      `LiveExecutor`/`infra.orders` guard vrstva (`guard_live_send_order`,
+      `block_duplicate_*`) — bezpečnostní pojistka, NE primární dedup.
+
+      `sent_signals` (loop-level, z `main.py`/`runtime/startup.py` recovery)
+      a `tracker_state` se předávají do `LiveExecutor` (viz `__init__` níže) —
+      slouží jen k bookkeepingu (`failed_signals_replay`), NE k enginu
+      samotnému (ten má vlastní `engine.sent_signals`, primární zdroj pravdy
+      pro dedup vstupů).
     """
 
     def __init__(
@@ -116,6 +150,10 @@ class LiveEngineSession:
         *,
         executor: Optional["Executor"] = None,
         apply_orders: bool = True,
+        sent_signals: Optional[Set[str]] = None,
+        failed_signals: Optional[Dict[str, Dict[str, Any]]] = None,
+        tracker_state: Any = None,
+        burn_in_df: Optional[pd.DataFrame] = None,
     ) -> None:
         # Engine config = grid engine pravidla + vynucený incremental_causal režim
         # (referenční pravda pro live paritu; __post_init__ vynutí causal_mode=True).
@@ -139,32 +177,93 @@ class LiveEngineSession:
 
         self.engine = BacktestEngine(engine_cfg)
         # Executor: default LiveExecutor (MT5 pass-through); testy injektují spy.
+        # `sent_signals`/`tracker_state` (3D): loop-level bookkeeping (main.py /
+        # runtime/startup.py recovery, failed_signals_replay) — sdílená reference
+        # se sadou z live_loop, NE nový primární dedup (ten drží `engine.sent_signals`).
         if executor is None:
             from runtime.live_executor import LiveExecutor
 
-            executor = LiveExecutor(engine_cfg, apply_orders=apply_orders)
+            executor = LiveExecutor(
+                engine_cfg,
+                sent_signals=sent_signals,
+                tracker_state=tracker_state,
+                apply_orders=apply_orders,
+            )
         self.executor: "Executor" = executor
+        self.sent_signals: Optional[Set[str]] = sent_signals
+        self.failed_signals: Optional[Dict[str, Dict[str, Any]]] = failed_signals
+        self.tracker_state: Any = tracker_state
         self.ctx: Optional["BarContext"] = None
         self._wave_source = None
         self._df: Optional[pd.DataFrame] = None
-        self.prepare(df)
+        self._last_closed_time: Optional[pd.Timestamp] = None
+        self._last_len: int = 0
+        self.prepare(df, burn_in_df=burn_in_df)
 
     # ------------------------------------------------------------------
-    def prepare(self, df: pd.DataFrame) -> "BarContext":
+    def prepare(
+        self, df: pd.DataFrame, *, burn_in_df: Optional[pd.DataFrame] = None
+    ) -> "BarContext":
         """
         Cold start / reset: vlastní `IncrementalWaveSource` + `engine.prepare()`.
 
         `prepare()` v incremental režimu provede O(n) per-bar advance detektoru a
         naplní `ctx.waves_by_bar` (engine.py). Tím jsou vlny narozené na každém
         baru materializované před `process_bar(i)`.
+
+        POZOR (3D): `engine.prepare()` je destruktivní — resetuje `pending_orders`/
+        `open_trades`/`closed_trades`/`sent_signals`/`wave_birth_by_time`/...
+        (viz `backtest/engine.py`). Volající (`refresh_df_if_needed` /
+        `_run_live_loop_backtester`) musí po `prepare()` PŘEHRÁT celé aktuální
+        okno (`process_closed_bars(df, range(1, len(df)))`), ne jen nové bary —
+        jinak engine ztrácí nahromaděný stav (P3 bug).
+
+        `burn_in_df` (window-shift bug fix — viz `strategy/wave_source.py`
+        `IncrementalWaveSource` docstring a `scripts/_diag_window_shift_check.py`):
+        volitelné bary bezprostředně PŘED `df` (stejný zdroj/kontinuální), použité
+        JEN k tomu, aby `PineWaveDetector` cold-seedoval o kus dřív a stav
+        (pivot/cand/EXT tracker) konvergoval dřív, než dojde na bar 0 `df` —
+        tím se vlny uvnitř `df` stanou nezávislé na tom, kde přesně MT5 rolling
+        okno začíná. `df`/`ctx`/replay okno (`process_closed_bars`) se NEMĚNÍ —
+        burn-in ovlivňuje jen počáteční stav detektoru, ne rozhodovací historii.
         """
         from strategy.wave_source import IncrementalWaveSource
 
         self._df = df
-        self._wave_source = IncrementalWaveSource(df, self.engine_cfg)
+        self._wave_source = IncrementalWaveSource(
+            df, self.engine_cfg, burn_in_df=burn_in_df
+        )
         self.ctx = self.engine.prepare(df, wave_source=self._wave_source)
         self.engine._executor = self.executor
+        self._last_closed_time = (
+            pd.Timestamp(df["time"].iloc[-1]) if len(df) else None
+        )
+        self._last_len = len(df)
         return self.ctx
+
+    def refresh_df_if_needed(
+        self, df: pd.DataFrame, *, burn_in_df: Optional[pd.DataFrame] = None
+    ) -> bool:
+        """
+        `prepare()` znovu JEN pokud se `df` opravdu změnilo (nový closed bar —
+        jiná délka nebo jiný poslední timestamp), NE při opakovaném pollu se
+        stejným oknem (5s polling dedup na úrovni `live_loop` volá tuto metodu
+        jen po zjištění nového baru, toto je defenzivní druhá pojistka).
+
+        Vrací True pokud proběhl `prepare()` (volající pak MUSÍ přehrát celé
+        okno přes `process_closed_bars`, viz docstring `prepare()`).
+
+        `burn_in_df`: viz `prepare()` — předává se dál beze změny; volající
+        (`_run_live_loop_backtester`) ho fetchuje z MT5 spolu s `df` (bary
+        bezprostředně před `df`), viz `runtime/live_loop.py`.
+        """
+        if len(df) == 0:
+            return False
+        new_last = pd.Timestamp(df["time"].iloc[-1])
+        if len(df) == self._last_len and new_last == self._last_closed_time:
+            return False
+        self.prepare(df, burn_in_df=burn_in_df)
+        return True
 
     def advance_waves_for_bar(self, i: int) -> List[dict]:
         """

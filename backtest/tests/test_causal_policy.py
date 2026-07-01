@@ -1,6 +1,9 @@
 """Unit testy causal backtest policy."""
+from dataclasses import replace
+
 from backtest.causal_policy import (
     CausalBacktestPolicy,
+    policy_from_cfg,
     retro_bos_entry_allowed,
     bos_flip_wave_at_bar,
 )
@@ -33,3 +36,34 @@ def test_policy_from_cfg_off_by_default():
     cfg = BotConfig()
     assert cfg.causal_mode is False
     assert cfg.run_e2e_parity is False
+
+
+# --- FÁZE 3C-b: relaxed_wave_box_enabled (profil B) ---------------------------
+
+
+def test_relaxed_wave_box_disabled_by_default():
+    cfg = BotConfig()
+    assert cfg.relaxed_wave_box_enabled is False
+
+
+def test_policy_from_cfg_relaxed_wave_box_disabled_keeps_clamp():
+    cfg = BotConfig(causal_mode=True, relaxed_wave_box_enabled=False)
+    policy = policy_from_cfg(cfg)
+    assert policy.clamp_wave_box_to_bar is True
+    assert policy.block_retro_before_birth is True
+    assert policy.filter_flip_map_by_birth is True
+
+
+def test_policy_from_cfg_relaxed_wave_box_enabled_drops_clamp():
+    cfg = BotConfig(causal_mode=True, relaxed_wave_box_enabled=True)
+    policy = policy_from_cfg(cfg)
+    assert policy.clamp_wave_box_to_bar is False
+    # retro/flip brany zustavaji VZDY ON, nezavisle na relaxed_wave_box_enabled.
+    assert policy.block_retro_before_birth is True
+    assert policy.filter_flip_map_by_birth is True
+
+
+def test_policy_from_cfg_relaxed_wave_box_via_replace():
+    """dataclasses.replace(...) (grid translator) musi respektovat pole shodne jako BotConfig(...)."""
+    cfg = replace(BotConfig(causal_mode=True), relaxed_wave_box_enabled=True)
+    assert policy_from_cfg(cfg).clamp_wave_box_to_bar is False

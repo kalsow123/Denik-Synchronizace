@@ -224,7 +224,7 @@ _LIVE_ONLY_SKIP_GRID_MERGE = frozenset({
     "wave_detection_mode",
     # 2B strangler feature flag — live-only, grid ho nezna; drz se zdrojoveho cfg,
     # at resolve_grid/live_execution_config nesmaze zapnuty flag zpet na False.
-    "live_use_process_bar",
+    "live_engine_usage",
 })
 
 

@@ -9,6 +9,7 @@ from config.bot_config import BotConfig
 from core.logging_utils import log_event
 from core.signal_keys import get_signal_key
 from core.trading_days import is_older_than_business_days
+from core.market_data import load_bars
 from infra.live_order_guard import deduplicate_magic_pendings
 from infra.market_data import get_bars
 from infra.orders import send_startup_pending_only
@@ -233,7 +234,38 @@ def block_historical_waves(cfg: BotConfig, sent_signals: Set[str]) -> Set[str]:
     Detekuje vsechny historicke vlny v poslednich STARTUP_BARS barech
     a oznaci je jako uz zpracovane, aby je live loop neposlal pres send_order()
     s povolenym market fallbackem.
+
+    Mode-aware podle `cfg.live_engine_usage` (FAZE 3, akce 3E — viz
+    "FAZE 3 — live_engine_usage E2E recovery.txt", sekce 3E bod 2):
+
+      E2E (beze zmeny)
+        Puvodni cesta `get_bars`/`detect_waves` — odpovida presne tomu, jak
+        rozhoduje `runtime.live_loop_legacy.run_live_loop()`. NESAHAT.
+
+      BACKTESTER
+        `load_bars` (bez `detect_waves`) + MT5 aktivni wave_times
+        (`get_active_wave_times`/`get_position_wave_times`).
+        POZNAMKA (minimalni verze, viz "ZBYVA" v zaverecne zprave agenta):
+        toto pridava do `sent_signals` SUROVE `wave_time` retezce z MT5
+        comментu, NE plny `get_signal_key()` format (dir_fib50_sl_wave_time)
+        pouzivany jinde (napr. `failed_signals_replay`). V BACKTESTER modu
+        realne rozhoduje `LiveEngineSession`/`LiveExecutor` (dedup pres MT5
+        comment guardy v `infra/orders.py`, NE `sent_signals`), takze tato
+        nepresnost nema vliv na produkcni rozhodovani — `sent_signals` v tomto
+        modu slouzi jen `replay_failed_signals` bookkeepingu. Plnohodnotna
+        nahrada (IncrementalWaveSource birth-map -> presny signal_key) je
+        samostatny budouci krok plne akce 3E.
     """
+    from config.enums import LiveEngineUsage
+
+    if cfg.live_engine_usage == LiveEngineUsage.BACKTESTER:
+        df_boot = load_bars(cfg, source="mt5", n=cfg.startup_bars, include_forming=False)
+        if df_boot is not None and len(df_boot) >= 2:
+            sent_signals |= get_active_wave_times(cfg)
+            sent_signals |= get_position_wave_times(cfg)
+        return sent_signals
+
+    # E2E — PONECHANO beze zmeny (odpovida live_loop_legacy behu).
     df_boot = get_bars(cfg, cfg.startup_bars)
     symbol_info = mt5.symbol_info(cfg.symbol)
     signal_digits = int(getattr(symbol_info, "digits", 4)) if symbol_info else 4

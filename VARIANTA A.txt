@@ -48,9 +48,9 @@ MAPA POJMŮ (přečti jako první)
   │ Akce │ Co dělá                                 │ Agent (doporučení)       │
   ├──────┼─────────────────────────────────────────┼──────────────────────────┤
   │ 1A   │ Golden regrese (164 / +39 041 USD)      │ Composer 2.5             │
-  │ 1B   │ Inkrementální detektor vln (NOVÝ kód)   │ Opus 4.8                 │
+  │ 1B   │ Inkrementální detektor vln (NOVÝ kód)   │ Sonnet 5.0                 │
   │ 1C   │ Testy: birth-parita + coupling          │ Gemini 3.1 pro           │
-  │ 1D   │ Extrakce process_bar() z engine.run()   │ Opus 4.8                 │
+  │ 1D   │ Extrakce process_bar() z engine.run()   │ Sonnet 5.0                 │
   │ 1E   │ Testy: legacy==1A + executor gap-check  │ Composer / Gemini 3.1 pro│
   │ 1F   │ Incremental reference PnL + snapshot    │ Composer 2.5             │
   │ 1G   │ Exit timing + session (volitelné)       │ Gemini 3.1 pro           │
@@ -121,10 +121,10 @@ MULTITASKING — CO SPUSTIT ZÁROVEŇ / CO NE (fáze 1):
   ┌─────────┬──────────────────────────────┬─────────────────────────────────────┐
   │ Vlna    │ Spustit ZÁROVEŇ              │ Agent                               │
   ├─────────┼──────────────────────────────┼─────────────────────────────────────┤
-  │ 1       │ 1A  +  1B                    │ Composer 2.5  +  Opus 4.8           │
+  │ 1       │ 1A  +  1B                    │ Composer 2.5  +  Sonnet 5.0           │
   │ 2       │ 1C  +  1A (pokud ještě běží) │ Gemini 3.1 pro  +  Composer 2.5     │
   │         │   (1C až po hotovém 1B)    │                                     │
-  │ 3       │ jen 1D                       │ Opus 4.8  (1 agent)                 │
+  │ 3       │ jen 1D                       │ Sonnet 5.0  (1 agent)                 │
   │ 4       │ 1E  +  1F                     │ Composer/Gemini  +  Composer 2.5    │
   │         │   (1F až po hotovém 1D)    │                                     │
   │ 5       │ jen 1G (volitelné)           │ Gemini 3.1 pro  (1 agent)           │
@@ -323,7 +323,7 @@ LiveExecutor — MT5 mechanika BEZ backtest ekvivalentu (musí se zachovat!):
     - 1B = strategy/ + config/ + nový modul wave_source (viz 3.2).
     - 1A NESMÍ měnit engine.py, strategy/, config/.
     - 1B ve vlne 1 NESMÍ měnit engine.py (detector + config; napojení až po 1B).
-    → dva agenti / /multitask: Composer 2.5 (1A) + Opus 4.8 (1B).
+    → dva agenti / /multitask: Composer 2.5 (1A) + Sonnet 5.0 (1B).
 
 
 3.2 Akce 1B — INKREMENTÁLNÍ DETEKTOR + PŘEPÍNAČ
@@ -376,12 +376,12 @@ Problém:
     incremental = nová referenční pravda pro live (typicky blíž ~36–37k dnešnímu
     live var. C, po sjednocení orchestrátoru potenciál gap zúžit pod ~2,5k)
 
-  Agent: Opus 4.8
+  Agent: Sonnet 5.0
 
   Paralelně s 1A (vlna 1):
     - Ve vlne 1 NESAHEJ do backtest/engine.py (jen detector, config, wave_source modul).
     - Napojení WaveSource do engine.prepare až po commitu 1B (před akcí 1C).
-    - Viz 3.1 — dva agenti současně: Composer 2.5 (1A) + Opus 4.8 (1B).
+    - Viz 3.1 — dva agenti současně: Composer 2.5 (1A) + Sonnet 5.0 (1B).
 
 
 3.3 Akce 1C — TESTY K 1B (birth-parita + coupling)
@@ -431,7 +431,7 @@ Cíl:
     - position-cap prune        (apply_pending_prune)
     - two-sided promote/TP clear (infra/trade_tracker.py)
 
-  Agent: Opus 4.8  (1 agent — nesdílet engine.py s nikým jiným)
+  Agent: Sonnet 5.0  (1 agent — nesdílet engine.py s nikým jiným)
 
 
 3.5 Akce 1E — TESTY K 1D (legacy==1A + gap-check)
@@ -679,7 +679,7 @@ Cíl:
 
   Závislosti:  1D hotovo; doporučeno AŽ PO 2B+2G (stabilní live napojení)
 
-  Agent:  Opus 4.8  (1 agent — sdílí engine.py)
+  Agent:  Sonnet 5.0  (1 agent — sdílí engine.py)
 
   Riziko:  Střední — velký diff, snadno rozbije grid; mitigace = čistý refactor bez
            logické změny + povinná 1A/1E regrese.
@@ -760,7 +760,7 @@ Cíl:
   Závislosti:  2E (LiveExecutor skeleton); doporučeno 1C (birth-parita) před produkčním
                live spojením; 1G flagy default OFF beze změny
 
-  Agent:  Opus 4.8  (1 agent — live_loop.py + nový session modul)
+  Agent:  Sonnet 5.0  (1 agent — live_loop.py + nový session modul)
 
   Riziko:  Střední — ADX14/EXT/WF edge cases; mitigace = incremental parity test +
            postupné vypínání starých větví (feature flag live_use_process_bar=True)
@@ -887,7 +887,7 @@ Cíl:
 
   Závislosti:  1D (Executor protokol); paralelně s 2D; PŘED 2B integrací
 
-  Agent:  Opus 4.8  (protokol + orders mapování)
+  Agent:  Sonnet 5.0  (protokol + orders mapování)
 
   Riziko:  Střední — TS2/EXT/PP různé place_* cesty; mitigace = 1E gap-check seznam +
            mock testy per order typ
@@ -938,7 +938,7 @@ Cíl:
 
   Závislosti:  2B + 2E hotové
 
-  Agent:  Opus 4.8  (1 agent — live_loop.py)
+  Agent:  Sonnet 5.0  (1 agent — live_loop.py)
 
   Riziko:  Střední — regrese live-only chování; mitigace = zachovat session testy
            (tests/test_live_execution_modes.py, test_live_wave_isolation.py)
@@ -982,10 +982,10 @@ Cíl:
   │ Vlna    │ Spustit ZÁROVEŇ              │ Agent                               │
   ├─────────┼──────────────────────────────┼─────────────────────────────────────┤
   │ 0       │ 1C (pokud chybí)             │ Gemini 3.1 pro  (1 agent)           │
-  │ 1       │ 2E  +  2D                    │ Opus 4.8  +  Composer/Gemini        │
-  │ 2       │ jen 2B                       │ Opus 4.8  (1 agent)                 │
-  │ 3       │ 2F  →  pak 2G                │ Opus 4.8  →  Composer 2.5           │
-  │ 4       │ 2A (volitelně)               │ Opus 4.8  (1 agent)                 │
+  │ 1       │ 2E  +  2D                    │ Sonnet 5.0  +  Composer/Gemini        │
+  │ 2       │ jen 2B                       │ Sonnet 5.0  (1 agent)                 │
+  │ 3       │ 2F  →  pak 2G                │ Sonnet 5.0  →  Composer 2.5           │
+  │ 4       │ 2A (volitelně)               │ Sonnet 5.0  (1 agent)                 │
   └─────────┴──────────────────────────────┴─────────────────────────────────────┘
 
   ┌──────────────┬──────────────┬──────────────────────────────────────────────┐
@@ -1051,9 +1051,9 @@ Cíl:
     3) TEPRVE PAK spustit finální DoD verifikaci proti checklistu (a)–(f) výše.
   ROZDĚLENÍ MODELŮ:
     - Testy / gate  = Composer 2.5  (API limity v pohodě → sem patří dlouhé běhy).
-    - Nutné úpravy  = Opus 4.8.  Po každé úpravě ZNOVU otestovat (Composer).
+    - Nutné úpravy  = Sonnet 5.0.  Po každé úpravě ZNOVU otestovat (Composer).
   ZÁCHRANA API:
-    - Když se Opus 4.8 zasekne / běží v loopu → OKAMŽITĚ vypnout, ať nežere API.
+    - Když se Sonnet 5.0 zasekne / běží v loopu → OKAMŽITĚ vypnout, ať nežere API.
   COMMIT POLITIKA TOHOTO FINÁLNÍHO TASKU:
     - Případné opravy vzešlé z finální DoD verifikace se NEcommitují a NEpushují
       (necháváme je lokálně k revizi uživatelem).
@@ -1080,6 +1080,37 @@ Cíl:
     net PnL:       +124 461.68 USD
     max DDi:       −10.34 %
     zdroj testu:   backtest/tests/test_incremental_reference_snapshot.py
+
+  ── Rozdíl legacy vs live (~159 500 USD WAVE PnL) — jen kauzální brány ──
+  (stejné legacy vlny, legacy OFF 751/+279k vs legacy ON 662/+119,6k; audit 2026-07-01)
+  Look-ahead detekce vln (legacy vs incremental) je zanedbatelný (~+5k); gap tvoří brány.
+
+  ┌─────────────────────────────┬────────┬──────────────┬────────────────────────────┐
+  │ Typ WAVE (blok branami)     │ Obch.  │ PnL (USD)    │ Co to je / jak vzniká      │
+  ├─────────────────────────────┼────────┼──────────────┼────────────────────────────┤
+  │ WAVE — retro / před birth   │   89   │  ≈ +163 100  │ BOS flip → vstup na vlnu   │
+  │                             │        │              │ dřív než Pine birth; v stats │
+  │                             │        │              │ jde jako WAVE (ne BOS flag). │
+  │                             │        │              │ Live to nemůže — vlna na   │
+  │                             │        │              │ flip baru ještě neexistuje.  │
+  ├─────────────────────────────┼────────┼──────────────┼────────────────────────────┤
+  │ WAVE — clamp / flip filtr   │   55   │  ≈ +14 500   │ Vstup zrušen: useknutý box │
+  │ (ostatní)                   │        │              │ (EP/SL bez budoucích barů)  │
+  │                             │        │              │ nebo vlna vyfiltrovaná z   │
+  │                             │        │              │ bos_flip_map (birth > bar).  │
+  └─────────────────────────────┴────────┴──────────────┴────────────────────────────┘
+
+  Ostatní druhy (WAVE_COUNTER, TS2_, drift stejných obchodů) — cenově zanedbatelné;
+  neřešíme. „Dostat 159k zpět do live“ = vypnout brány = obchodovat s budoucností
+  (nepoužitelné pro produkci). Live cíl = incremental STRICT (+124,5k), ne legacy (+279k).
+
+  ── relaxed_wave_box_enabled (profil B) — VOLITELNÉ, fáze 3 akce 3C-b ──
+  Config přepínač (default VYP): relaxed_wave_box_enabled=False → STRICT (+124,5k / DD −10,34 %).
+  True → vypne clamp boxu u WAVE vstupu; retro blok (~163k) zůstává VŽDY ON; flip filtr ON.
+  Potenciální Δ PnL až ~14,5k (legacy měření) — NEGARANTOVÁNO na incremental vlnách.
+  Zapnutí jen po 2letém auditu: Δ PnL > 0 AND max DD profilu B ≤ STRICT + 1,0 pp.
+  Wiring 3A–3E sám o sobě PnL nemění; live/E2E/backtest čtou stejný cfg flag. LFT: NEAKTIVNÍ.
+  Viz: FAZE 3 — live_engine_usage E2E recovery.txt (sekce 3C-b, PnL blok u cíle fáze 3).
 
   Výsledek fáze 2 (ověřeno finální DoD, sekce 5.9 — VŠE PASS):
     Decision parity NA BACKTESTERU: incremental_causal process_bar loop
@@ -1153,7 +1184,7 @@ Cíl:
               multitasking, DoD checklist); sekce 3.9 zaškrtnutí 1A/1B/1D/1E/1F.
   2026-06-30  Sekce 5.9: checklist aktualizován (2A/2B/2E/2F hotové, 2D částečně,
               2G + plný gate zbývají) + PROTOKOL finální DoD verifikace
-              (Composer=testy / Opus 4.8=úpravy, kill Opus při loopu,
+              (Composer=testy / Sonnet 5.0=úpravy, kill Sonnet 5.0 při loopu,
               fixy z finálního tasku NEcommitovat/NEpushovat, vždy 2leté okno).
   2026-07-01  Fáze 2 dokončena a ověřena (DoD 5.9 = VŠE PASS): 2D-finish (load_bars
               csv), grid combo-count fix, 2G (missed_bar_replay smazán). Sekce 6

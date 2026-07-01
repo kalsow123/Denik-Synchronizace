@@ -109,6 +109,20 @@ log = logging.getLogger(__name__)
 
 _live_two_sided_tracker = TwoSidedTracker()
 
+# Window-shift bug fix (viz `strategy/wave_source.py` IncrementalWaveSource
+# docstring + `scripts/_diag_window_shift_check.py`): MT5 vrací pro
+# `cfg.startup_bars` rolling okno, které se s KAŽDÝM novým barem posune o 1 —
+# `PineWaveDetector` by se jinak cold-seedoval (hardcoded pivot_dir=1 z bar 0)
+# na JINÉM baru při každém refreshi, což retroaktivně mění klasifikaci vln
+# uvnitř okna jen kvůli posunu, ne kvůli nové ceně (empiricky zdokumentováno
+# v diag skriptu — rozdíly až ~360 barů hluboko do okna). Fix: fetchni
+# navíc `_WAVE_CAUSAL_BURN_IN_BARS` barů PŘED `cfg.startup_bars` oknem a použij
+# je jen k tomu, aby detektor konvergoval dřív (viz `LiveEngineSession.prepare`
+# `burn_in_df`); burn-in bary samotné se do rozhodovacího okna/replay nezahrnují.
+# Hodnota (2000) je zvolena s bezpečnou rezervou nad zjištěnou konvergenční
+# hloubkou (~360 barů) — viz report v `scripts/_diag_window_shift_check.py`.
+_WAVE_CAUSAL_BURN_IN_BARS = 2000
+
 """
     Bezi neustale dokud neprijde KeyboardInterrupt nebo shutdown signal.
     V kazdem cyklu:
@@ -575,6 +589,24 @@ def _maybe_place_live_counter_from_tp(
 
 
 def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str | None = None) -> None:
+    """Tenky dispatcher podle `cfg.live_engine_usage` (FAZE 3, akce 3C).
+
+    BACKTESTER (default) → `_run_live_loop_backtester()` (dnesni produkcni
+    LiveEngineSession/process_bar cesta, BEZE ZMENY chovani).
+    E2E → deleguje na `runtime.live_loop_legacy.run_live_loop()` (zamrzla
+    kopie stare implementace pred "2F: tenky live_loop" refaktoringem —
+    odpovida realnym zivym botum bezicim MIMO tento repo na stare logice).
+    """
+    from config.enums import LiveEngineUsage
+
+    if cfg.live_engine_usage == LiveEngineUsage.E2E:
+        from runtime import live_loop_legacy
+
+        return live_loop_legacy.run_live_loop(cfg, sent_signals, json_log_file=json_log_file)
+    return _run_live_loop_backtester(cfg, sent_signals, json_log_file=json_log_file)
+
+
+def _run_live_loop_backtester(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str | None = None) -> None:
     from runtime.live_wave_isolation import (
         log_live_execution_mode,
         resolve_live_execution_config,
@@ -632,10 +664,10 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
     # Posledni uzavreny bar, na kterem uz probehla strategie (5s polling preskoci duplicitu).
     last_processed_closed_bar_time: Optional[pd.Timestamp] = None
 
-    # 2B STRANGLER (VARIANTA A.txt §5.2): feature flag live_use_process_bar.
-    # Default OFF → tato session se NIKDY nevytvoří a live_loop běží jako dnes.
-    # True → rozhodování deleguje na LiveEngineSession.process_closed_bars
-    # (jeden rozhodovač = BacktestEngine.process_bar). Vytvoří se líně níže.
+    # 2B STRANGLER (VARIANTA A.txt §5.2), FAZE 3 3C: tato funkce bezi jen v
+    # BACKTESTER modu (viz cfg.live_engine_usage dispatch v run_live_loop()).
+    # Rozhodovani deleguje na LiveEngineSession.process_closed_bars (jeden
+    # rozhodovac = BacktestEngine.process_bar). Vytvori se line nize.
     live_engine_session = None  # type: ignore[var-annotated]
 
     # WAVE_TARGET_N — TP-vlny W(N) uz zpracovane; forming_tp_watch pro G.
@@ -942,11 +974,31 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
             # Cancel expirovanych pendingu
             cancel_expired_pending(cfg)
 
-            df = load_bars(cfg, source="mt5", n=cfg.startup_bars, include_forming=False)
-            if df is None or df.empty:
+            # Window-shift fix: fetchni burn-in navic pred `cfg.startup_bars`
+            # oknem (viz `_WAVE_CAUSAL_BURN_IN_BARS` docstring vyse) a rozdel
+            # na `burn_in_df` (jen pro konvergenci detektoru) + `df` (rozhodovaci
+            # okno, presne `cfg.startup_bars` barů — beze zmeny chovani mimo
+            # wave detekci).
+            df_fetch = load_bars(
+                cfg,
+                source="mt5",
+                n=cfg.startup_bars + _WAVE_CAUSAL_BURN_IN_BARS,
+                include_forming=False,
+            )
+            if df_fetch is None or df_fetch.empty:
                 log.warning("Nepodarilo se nacist data, zkousim znovu...")
                 time.sleep(cfg.sleep_sec)
                 continue
+            if len(df_fetch) > cfg.startup_bars:
+                _split_ix = len(df_fetch) - cfg.startup_bars
+                burn_in_df = df_fetch.iloc[:_split_ix].reset_index(drop=True)
+                df = df_fetch.iloc[_split_ix:].reset_index(drop=True)
+            else:
+                # MT5 nevratilo dost historie pro burn-in (napr. cerstve
+                # zalozeny/omezeny symbol) — degraduj na puvodni (bez burn-in)
+                # chovani, ne fatal chyba.
+                burn_in_df = None
+                df = df_fetch
 
             if adx14_runtime.active and adx14_runtime.needs_history_bars():
                 adx14_df = load_bars(
@@ -970,18 +1022,48 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                 _emit_live_periodic_logs()
                 continue
 
-            # ───── 2F: JEDEN rozhodovač — engine.process_bar přes LiveEngineSession ─────
+            # ───── 2F/3D: JEDEN rozhodovač — engine.process_bar přes LiveEngineSession ─────
             # Veškerá strategická rozhodnutí (WAVE/BOS/PP/counter/two-sided/EXT/WF/
-            # WAVE_TARGET_N) dělá process_bar; live_loop jen orchestruje IO. Cold start /
-            # reset každý cyklus nad aktuálním closed df, pak process_bar přes nové closed
-            # bary (catch-up = N× process_bar nad sdíleným ctx = parita s batch).
+            # WAVE_TARGET_N) dělá process_bar; live_loop jen orchestruje IO.
+            #
+            # 3D (oprava P3/P4): `LiveEngineSession` se vytváří JEDNOU při startu
+            # loopu (ne při každém novém baru — to byl P3 bug: `prepare()` je
+            # destruktivní, nová session každý bar = engine ztrácel open_trades/
+            # pending_orders/sent_signals mezi bary). Při dalších cyklech se jen
+            # `refresh_df_if_needed()` (prepare() znovu POUZE když MT5 vrátil
+            # skutečně nový closed bar — rolling okno `cfg.startup_bars` barů se
+            # posouvá, indexy mezi cykly nejsou stabilní).
+            #
+            # Protože `prepare()` engine stav vždy resetuje, po každém refresh
+            # PŘEHRÁVÁME CELÉ aktuální okno (`range(1, len(df))`), ne jen nové
+            # bary — deterministicky/bit-identicky s dávkovým (batch) zpracováním
+            # (parita: tests/test_live_catch_up_parity.py,
+            # tests/test_live_persistent_session_parity.py). `engine.sent_signals`
+            # tak na konci cyklu odpovídá kumulativní historii okna (P4 — jeden
+            # zdroj pravdy), NE prázdnému stavu po jednom baru. Skutečnou
+            # duplicitu MT5 volání (re-send již odeslaného orderu) blokuje
+            # LiveExecutor/infra.orders guard vrstva (`guard_live_send_order`,
+            # `block_duplicate_*`) — bezpečnostní pojistka, ne primární dedup.
+            #
             # Live-only kontrakt zůstává mimo process_bar: forming-bar strip (load_bars
             # include_forming=False), session pre-close cancel, cancel_expired_pending,
             # guard/dedup (LiveExecutor), recovery (startup.py), TZ align (session_manager).
-            # Catch-up indexy + MISSED_BARS_CATCH_UP log = LiveEngineSession.catch_up_missed.
-            from runtime.live_engine_session import LiveEngineSession
+            # Catch-up indexy + MISSED_BARS_CATCH_UP log = LiveEngineSession.catch_up_missed
+            # (zachováno jen pro observabilitu / no-op gate — zpracování jde přes celé okno).
+            if live_engine_session is None:
+                from runtime.live_engine_session import LiveEngineSession
 
-            live_engine_session = LiveEngineSession(cfg, df)
+                live_engine_session = LiveEngineSession(
+                    cfg,
+                    df,
+                    sent_signals=sent_signals,
+                    failed_signals=failed_signals,
+                    tracker_state=tracker_state,
+                    burn_in_df=burn_in_df,
+                )
+            else:
+                live_engine_session.refresh_df_if_needed(df, burn_in_df=burn_in_df)
+
             new_bar_indices = live_engine_session.catch_up_missed(
                 df, last_processed_closed_bar_time
             )
@@ -990,7 +1072,7 @@ def run_live_loop(cfg: BotConfig, sent_signals: Set[str], *, json_log_file: str 
                 continue
 
             last_processed_closed_bar_time = closed_bar_ts
-            live_engine_session.process_closed_bars(df, new_bar_indices)
+            live_engine_session.process_closed_bars(df, list(range(1, len(df))))
 
             # ───── MT5 reconnect detekce (live-only kontrakt) ─────
             mt5_connected_now = bool(mt5.terminal_info()) and bool(mt5.account_info())

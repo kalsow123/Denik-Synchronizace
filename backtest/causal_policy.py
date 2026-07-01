@@ -33,7 +33,12 @@ def policy_from_cfg(cfg: BotConfig) -> CausalBacktestPolicy:
     mode = getattr(cfg, "wave_detection_mode", None)
     if mode is not None and str(getattr(mode, "value", mode)) == "incremental_causal":
         on = True
-    return CausalBacktestPolicy(enabled=on)
+    # FÁZE 3C-b (profil B): relaxed_wave_box_enabled=True vypne clamp_wave_box_to_bar
+    # (WAVE vstup nepouzije useknuti boxu na as_of_bar). Default False => clamp ON (STRICT).
+    # block_retro_before_birth a filter_flip_map_by_birth NEJSOU timto polem ovlivnene —
+    # zustavaji na default True (hard lock, viz VARIANTA A.txt).
+    clamp_wave_box_to_bar = not bool(getattr(cfg, "relaxed_wave_box_enabled", False))
+    return CausalBacktestPolicy(enabled=on, clamp_wave_box_to_bar=clamp_wave_box_to_bar)
 
 
 def retro_bos_entry_allowed(

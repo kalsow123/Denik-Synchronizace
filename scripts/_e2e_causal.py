@@ -49,7 +49,7 @@ def main() -> None:
     from runtime.missed_bar_replay import MissedBarReplayState, replay_missed_closed_bar
     from infra.orders import get_active_counter_wave_times
     from config.enums import PendingCancelMode
-    import runtime.live_loop as ll
+    import runtime.live_loop_legacy as ll
     from core.logging_utils import log_event
 
     df = filter_by_date_range(load_csv(str(CSV)), DATE_FROM, DATE_TO).reset_index(drop=True)

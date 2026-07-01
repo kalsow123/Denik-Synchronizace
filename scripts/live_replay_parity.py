@@ -223,7 +223,7 @@ def run_live_replay(df, cfg) -> tuple[list[RecordedOrder], dict]:
     from runtime.wf_live import WfLiveRuntime
     from runtime.missed_bar_replay import MissedBarReplayState, replay_missed_closed_bar
     from infra.orders import get_active_counter_wave_times
-    import runtime.live_loop as ll
+    import runtime.live_loop_legacy as ll
     from core.logging_utils import log_event
 
     _SENT_ORDERS.clear()
@@ -430,7 +430,7 @@ def classify_live_skip(wt: str, ctx: dict) -> str:
     """
     import pandas as pd
 
-    import runtime.live_loop as ll
+    import runtime.live_loop_legacy as ll
     from strategy.ext_logic import is_ext_wave
     from strategy.filters import (
         is_wave_in_allowed_session,
@@ -518,7 +518,7 @@ def classify_bt_skip(wt: str, ctx: dict) -> str:
     """
     import pandas as pd
 
-    import runtime.live_loop as ll
+    import runtime.live_loop_legacy as ll
     from strategy.ext_logic import is_ext_wave
     from strategy.filters import (
         is_wave_in_allowed_session,

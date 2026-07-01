@@ -1,8 +1,4 @@
 """
-DEPRECATED (akce 2G): Tento skript importoval runtime.missed_bar_replay (smazán).
-Catch-up / live rozhodování = LiveEngineSession.catch_up_missed + N× process_bar.
-Nepoužívat pro gate / CI — skript neběží bez missed_bar_replay.
-
 END-TO-END verifikace: ziva smycka (replay_missed_closed_bar) proti FAKE MT5
 brokeru pres historicke CSV. Cil: zmerit, zda LIVE plumbing (placement + BOS /
 WAVE_TARGET_N / G-extension exity) da stejne WAVE PnL/DDi jako backtest engine.
@@ -442,7 +438,20 @@ def filter_e2e_wave_closed(
     return out
 
 
-def main() -> None:
+def main(
+    *,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict:
+    global DATE_FROM, DATE_TO
+    if date_from is not None:
+        DATE_FROM = date_from
+    if date_to is not None:
+        if isinstance(date_to, str) and date_to.strip().lower() in ("", "none", "null"):
+            DATE_TO = None  # type: ignore[assignment]
+        else:
+            DATE_TO = date_to
+
     from config.bot_config import LIVE_BOT_CONFIG
     from config.position_modes import resolve_grid_engine_config
 
@@ -497,6 +506,26 @@ def main() -> None:
     _report(bt, lv, len(bt_wave), len(live_closed))
     _diagnostics(bt_wave, live_closed)
     _dump_trace()
+
+    from collections import Counter
+
+    return {
+        "date_from": DATE_FROM,
+        "date_to": DATE_TO,
+        "bars": len(df),
+        "backtest_trades": len(bt_wave),
+        "backtest_net_pnl_usd": float(bt.get("net_pnl_usd", 0) or 0),
+        "backtest_max_dd_pct": float(bt.get("max_drawdown_pct", 0) or 0),
+        "live_trades": len(live_closed),
+        "live_net_pnl_usd": float(lv.get("net_pnl_usd", 0) or 0),
+        "live_max_dd_pct": float(lv.get("max_drawdown_pct", 0) or 0),
+        "backtest_close_reasons": dict(
+            Counter(str(getattr(t, "close_reason", "?")) for t in bt_wave)
+        ),
+        "live_close_reasons": dict(
+            Counter(str(getattr(t, "reason", "?")) for t in live_closed)
+        ),
+    }
 
 
 def _dump_trace() -> None:
@@ -624,7 +653,7 @@ def run_e2e(df, cfg, fake: FakeMt5) -> list:
     from runtime.missed_bar_replay import MissedBarReplayState, replay_missed_closed_bar
     from infra.orders import get_active_counter_wave_times
     from config.enums import PendingCancelMode
-    import runtime.live_loop as ll
+    import runtime.live_loop_legacy as ll
     from core.logging_utils import log_event
     import pandas as pd
 
@@ -790,4 +819,23 @@ def _report(bt: dict, lv: dict, bt_n: int, lv_n: int) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="E2E LIVE (fake broker) vs BACKTEST WAVE parity report.",
+    )
+    parser.add_argument(
+        "--date-from",
+        default=DATE_FROM,
+        help=f"Start date YYYY-MM-DD (default: {DATE_FROM})",
+    )
+    parser.add_argument(
+        "--date-to",
+        default=DATE_TO,
+        help=(
+            f"End date YYYY-MM-DD (default: {DATE_TO}); "
+            "use 'none' for open end (2y window from dataset last bar)"
+        ),
+    )
+    args = parser.parse_args()
+    main(date_from=args.date_from, date_to=args.date_to)

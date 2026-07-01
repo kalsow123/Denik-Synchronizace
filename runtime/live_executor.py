@@ -125,6 +125,28 @@ class LiveExecutor(Executor):
 
         return find_bot_pending_by_comment(self.cfg, self._mt5_comment(order))
 
+    def _mark_sent(self, signal: Any, *, is_two_sided_mirror: bool = False) -> None:
+        """
+        Po úspěšném odeslání WAVE base / TS2 mirror orderu (3D dedup wiring):
+        synchronizuj loop-level `sent_signals` (main.py / runtime/startup.py
+        recovery, `failed_signals_replay` bookkeeping) se stejným `sig_key`
+        formátem, jaký používá `BacktestEngine.entry()` (primární dedup zdroj —
+        `engine.sent_signals`, viz `backtest/engine.py`). NENÍ to nová primární
+        deduplikace — jen udržuje loop-level sadu v souladu s tím, co bylo
+        skutečně odesláno, pro `failed_signals_replay` / recovery po restartu.
+        """
+        if self.sent_signals is None or signal is None:
+            return
+        try:
+            from core.signal_keys import get_signal_key
+
+            sig_key = get_signal_key(signal, digits=self._digits())
+            if is_two_sided_mirror:
+                sig_key = f"{sig_key}_M"
+            self.sent_signals.add(sig_key)
+        except Exception:  # pragma: no cover - bookkeeping nesmí shodit send
+            log.warning("_mark_sent: nepodarilo se spocitat/zapsat sig_key", exc_info=True)
+
     # --- order lifecycle ---------------------------------------------------
     def place_pending(
         self, order: "PendingOrder", bar_idx: int, bar_time: datetime
@@ -214,12 +236,14 @@ class LiveExecutor(Executor):
 
         from infra.orders import send_order
 
-        send_order(
+        ok = send_order(
             signal,
             self.cfg,
             bypass_trend_filter=False,
             is_two_sided_mirror=is_mirror,
         )
+        if ok:
+            self._mark_sent(signal, is_two_sided_mirror=is_mirror)
 
     def place_market(
         self, trade: "OpenTrade", bar_idx: int, bar_time: datetime
@@ -281,14 +305,17 @@ class LiveExecutor(Executor):
         signal = getattr(getattr(trade, "pending", None), "signal", None)
         if signal is None:
             return
+        is_mirror = bool(getattr(trade, "is_two_sided_mirror", False))
         from infra.orders import send_order
 
-        send_order(
+        ok = send_order(
             signal,
             self.cfg,
             bypass_trend_filter=False,
-            is_two_sided_mirror=bool(getattr(trade, "is_two_sided_mirror", False)),
+            is_two_sided_mirror=is_mirror,
         )
+        if ok:
+            self._mark_sent(signal, is_two_sided_mirror=is_mirror)
 
     def close_position(
         self,

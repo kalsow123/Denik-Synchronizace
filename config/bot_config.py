@@ -69,6 +69,7 @@ except ImportError:
 
 from config.enums import (
     EntryMode,
+    LiveEngineUsage,
     TPMode,
     TpWaveEarlyMode,
     TpWaveExitOn,
@@ -126,6 +127,15 @@ class BotConfig:
     causal_mode: bool = False
     # Backtest-only: po BT spustit live E2E parity (replay + fake MT5); ne pro grid
     run_e2e_parity: bool = False
+    # FÁZE 3C-b — "profil B": při zapnuto (True) se v causal_policy.policy_from_cfg()
+    # vypne clamp_wave_box_to_bar (kauzální brána, ktera useknava WAVE box na as_of_bar).
+    # Zvyšuje riziko DD (uživatel má obavu z DD) — proto default OFF = STRICT clamp
+    # (referenční 2leté okno: 640 obchodů / +124 461.68 USD / max DD −10.34 %).
+    # Zapnout jen po 2letém auditu s DD bránou (scripts/audit_relaxed_wave_box_2y.py)
+    # a explicitním schválení uživatele — NEMĚNIT na True bez tohoto schválení.
+    # block_retro_before_birth a filter_flip_map_by_birth zůstávají VŽDY True,
+    # nezávisle na tomto poli (hard lock — viz causal_policy.policy_from_cfg).
+    relaxed_wave_box_enabled: bool = False   # default VYP = STRICT (+124 461 / DD −10.34 %)
 
     # ============== TP SETTINGS ==============
     rrr:             float = 2.0
@@ -281,16 +291,16 @@ class BotConfig:
     # Modelovat live session pre-close cancel_all_pendings v backtestu.
     backtest_model_session_pre_close_cancel: bool = False
 
-    # ============== FÁZE 2 / 2B STRANGLER (default OFF = dnešní live beze změny) ==
-    # Feature flag pro strangler vrstvu (VARIANTA A.txt §5.2, akce 2B):
-    #   False (default) = live_loop běží PŘESNĚ jako dnes — duplicitní rozhodování
-    #                     (detect_waves + send_order bloky). Gate čistý, produkce
-    #                     beze změny.
-    #   True            = live_loop deleguje rozhodování na
-    #                     runtime.live_engine_session.LiveEngineSession.process_closed_bars
-    #                     (jeden rozhodovač = BacktestEngine.process_bar). Dnešní
-    #                     rozhodovací bloky se OBEJDOU (NEMAŽÍ se — to je 2B-cleanup/2G).
-    live_use_process_bar: bool = False
+    # ============== FÁZE 3 / 3C — LIVE ENGINE ROUTING (nahrazuje live_use_process_bar) ==
+    # Ktery engine skutecne rozhoduje v produkcnim runtime.live_loop.run_live_loop()
+    # (FAZE 3 — live_engine_usage E2E recovery.txt, REVIZE 2026-07-01):
+    #   BACKTESTER (default) = live rozhoduje pres BacktestEngine.process_bar
+    #                          (LiveEngineSession, novy engine sdileny s backtesterem).
+    #   E2E                  = deleguje na runtime.live_loop_legacy.run_live_loop()
+    #                          (zamrzla kopie stare implementace pred "2F: tenky
+    #                          live_loop" refaktoringem) — odpovida realnym zivym
+    #                          botum bezicim MIMO tento repo na stare logice.
+    live_engine_usage: LiveEngineUsage = LiveEngineUsage.BACKTESTER
 
     def __post_init__(self) -> None:
         """Sjednoti novy a starsi alias pro BOS entry prepinac."""
@@ -304,6 +314,16 @@ class BotConfig:
         # default) zustava causal_mode=False — pravidlo #6.
         if self.wave_detection_mode == WaveDetectionMode.INCREMENTAL_CAUSAL:
             self.causal_mode = True
+        # FÁZE 3C-b: relaxed_wave_box_enabled=True vypina clamp_wave_box_to_bar
+        # (vyssi riziko DD) — zaloguj WARNING pri startu, ať je zapnutí vidět v logu.
+        if self.relaxed_wave_box_enabled:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "BotConfig.relaxed_wave_box_enabled=True (profil B): clamp_wave_box_to_bar "
+                "je VYPNUTY — vyssi riziko DD oproti STRICT (default). Zapnuto jen po "
+                "2letem auditu (scripts/audit_relaxed_wave_box_2y.py) a schvaleni uzivatele."
+            )
         from strategy.wave_target_n_mode import normalize_wave_target_n_cfg
         normalize_wave_target_n_cfg(self)
 
@@ -349,7 +369,15 @@ LIVE_BOT_CONFIG = BotConfig(
     wave_min_pct=0.26,
     causal_mode=False,  #L True = backtest bez look-ahead (parita live); False = legacy grid
     run_e2e_parity=False,  #L True = po BT spustit E2E parity (live_match / --e2e)
+    relaxed_wave_box_enabled=True,  #L True=profil B AKTIVNI - schvaleno uzivatelem v chatu
+    #  2026-07-01 po 2letem DD auditu (scripts/audit_relaxed_wave_box_2y.py):
+    #  +10 obchodu / +2738.51 USD vs STRICT, max DD % beze zmeny (-10.34%->-10.34%).
+    #  Vypina clamp_wave_box_to_bar; retro_bos blok (block_retro_before_birth) ZUSTAVA vzdy zapnuty.
+    #  Vypnuti zpet na STRICT: False + restart, bez redeploy kodu.
     wave_session_filter_enabled=False,
+    live_engine_usage=LiveEngineUsage.BACKTESTER,  #L Backtester=live rozhoduje pres BacktestEngine.process_bar
+    #  (LiveEngineSession, novy engine); E2E=legacy engine (live_loop_legacy/missed_bar_replay,
+    #  odpovida realnym zivym botum na stare logice) — oba jsou PLATNE zive mody
 
     # ============== TP SETTINGS ==============
     rrr=2.5,
