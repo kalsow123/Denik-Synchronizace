@@ -8,6 +8,7 @@
 !/scripts/
 !/strategy/
 !/tests/
+!/docs/
 !/.gitignore
 !/main.py
 !/_debug_out.py
