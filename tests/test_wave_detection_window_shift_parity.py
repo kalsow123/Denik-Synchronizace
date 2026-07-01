@@ -27,10 +27,13 @@ from backtest.grid.data_cache import load_data
 from config.bot_config import LIVE_BOT_CONFIG
 from config.enums import WaveDetectionMode
 from config.position_modes import resolve_grid_engine_config
+from runtime.live_loop import _WAVE_CAUSAL_BURN_IN_BARS
 from strategy.wave_source import IncrementalWaveSource
 
 WINDOW_SIZE = 1440
-BURN_IN_BARS = 2000
+# Sleduje skutecnou produkcni hodnotu (runtime/live_loop.py), aby tento test
+# vzdy overoval realny burn-in pouzity v zivem botu, ne fixni hardcoded cislo.
+BURN_IN_BARS = _WAVE_CAUSAL_BURN_IN_BARS
 # Bar-index anchor v centralnim 2y EURUSD M30 datasetu, empiricky vybrany
 # (viz _diag_window_shift_check.py) tak, aby PRED fixem reprodukoval divergenci
 # pro VSECHNY testovane shifty (1/5/50 baru).

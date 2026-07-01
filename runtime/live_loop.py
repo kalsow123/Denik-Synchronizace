@@ -119,9 +119,15 @@ _live_two_sided_tracker = TwoSidedTracker()
 # navíc `_WAVE_CAUSAL_BURN_IN_BARS` barů PŘED `cfg.startup_bars` oknem a použij
 # je jen k tomu, aby detektor konvergoval dřív (viz `LiveEngineSession.prepare`
 # `burn_in_df`); burn-in bary samotné se do rozhodovacího okna/replay nezahrnují.
-# Hodnota (2000) je zvolena s bezpečnou rezervou nad zjištěnou konvergenční
-# hloubkou (~360 barů) — viz report v `scripts/_diag_window_shift_check.py`.
-_WAVE_CAUSAL_BURN_IN_BARS = 2000
+# Hodnota (200) byla empiricky re-ověřena (scripts/_diag_burn_in_200_check.py,
+# stejná metodika/8 base pozic/shifty 1,5,50 přes celé 2y okno jako původní
+# _diag_window_shift_check.py): burn_in=200 dosahuje 0.00% mismatch (0 barů
+# kontaminace) ve všech testovaných pozicích/shiftech — identicky s burn_in=500
+# i s původní hodnotou 2000. Baseline bez burn-in (0) měl nejhorší %mismatch
+# 5.31% s kontaminací až 366 barů hluboko do okna; i konzervativnější burn_in=100
+# už sám o sobě dosáhl 0.00% mismatch, takže 200 dává ~2x rezervu nad tímto
+# empiricky zjištěným prahem konvergence.
+_WAVE_CAUSAL_BURN_IN_BARS = 200
 
 """
     Bezi neustale dokud neprijde KeyboardInterrupt nebo shutdown signal.
